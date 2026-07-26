@@ -130,6 +130,28 @@ void GainStagerAudioProcessorEditor::timerCallback()
                              << processorRef.getActiveChannels() << " ch, "
                              << processorRef.getLatencySamples() << " smp latency";
 
+    // Phase 4: the plugin sat in LEARN doing nothing because it was 0.3 s short
+    // of the commit threshold, and said nothing about it. Never leave the user
+    // guessing why it has not committed.
+    const auto state = processorRef.getState();
+
+    if (state != GainStagerAudioProcessor::State::Hold)
+    {
+        const auto gated = processorRef.getGatedSeconds();
+        const auto minimum = GainStagerAudioProcessor::minimumGatedSeconds;
+
+        text << "\n\n";
+
+        if (processorRef.isResetPending())
+            text << "reset — waiting for audio to arrive";
+        else if (gated < minimum)
+            text << "needs " << juce::String (minimum - gated, 1)
+                 << " s more audio before it can commit";
+        else
+            text << "ready — commits when the transport stops, or at "
+                 << juce::String (processorRef.getLearnSeconds(), 0) << " s";
+    }
+
     if (processorRef.isCeilingLimited())
         text << "\n\n*** trim reduced to respect the ceiling ***";
 

@@ -23,9 +23,14 @@ public:
 
     /** Auto-commit fires once this much gated audio has accumulated, or once
         the callbacks stop for `transportIdleMs` with at least
-        `minimumGatedSeconds` in hand. */
+        `minimumGatedSeconds` in hand.
+
+        Phase 4 measured a real vocal: ~20 s of playback yielded 2.7 s of gated
+        audio. The commit-on-stop path is therefore the one that fires in
+        practice, and its threshold has to sit below what a single sung phrase
+        produces — 3.0 s missed by a hair on real material. */
     static constexpr int transportIdleMs = 1500;
-    static constexpr double minimumGatedSeconds = 3.0;
+    static constexpr double minimumGatedSeconds = 2.0;
 
     GainStagerAudioProcessor();
     ~GainStagerAudioProcessor() override;
@@ -74,6 +79,14 @@ public:
 
     /** Units of the current mode: LUFS for the loudness modes, dBFS otherwise. */
     juce::String getMeasurementUnit() const;
+
+    /** Gated audio needed before auto-commit fires on its own. */
+    double getLearnSeconds() const;
+
+    /** True between pressing Reset and the audio thread actually clearing the
+        meters. On a stopped transport this can persist indefinitely, which is
+        why the UI must not present stale readings as current. */
+    bool isResetPending() const noexcept { return resetPending.load(); }
 
     double getPreparedSampleRate() const noexcept { return preparedSampleRate.load(); }
     int    getPreparedBlockSize()  const noexcept { return preparedBlockSize.load(); }

@@ -269,7 +269,47 @@ the right bar rather than ±0.2.
 | **1** | `core/` loudness engine + reference tests (§5). No plugin work. | **done** — 58/58 |
 | **2** | Processor: state machine, params, persistence, ring buffer | **done** — `auval` green |
 | **3** | Native JUCE editor — big LUFS readout, trim readout, target field, Learn/Hold/Reset, gated-audio progress, ceiling-limited warning | next |
-| **4** | Validation in Logic on a real session | pending |
+| **4** | Validation in Logic on a real session | **done** |
+
+### Phase 4 result (resolved 2026-07-26): correct to 0.01 dB, after two fixes
+
+Tested twice: once on a real 27-track session, once against a synthetic file of
+known loudness (30 s stereo 1 kHz sine at exactly -30.0 LUFS by construction,
+44.1 kHz 16-bit) in a throwaway project.
+
+Against ground truth, target -18 LUFS:
+
+| | expected | measured |
+|---|---|---|
+| loudness | -30.00 LUFS | **-29.99** |
+| true peak | -30.00 dBTP | **-30.00** |
+| trim | +12.00 dB | **+11.99** |
+
+The 0.01 dB is 16-bit source quantisation. Auto-commit fired on its own at
+10.0 s of gated audio. The channel meter held -18.0 dBFS afterwards, confirming
+the gain reaches the audio and not just the readout. Save, close, reopen: came
+back in HOLD at 11.99 dB, and ten seconds of further playback did not re-learn
+or move the trim — the §3 persistence rule holds in the real host.
+
+**Two bugs the synthetic tests could never have caught:**
+
+1. **Reset did nothing while the transport was stopped.** `requestReset()`
+   cleared the display, then the 10 Hz timer overwrote it 100 ms later by
+   reading meters the audio thread had not cleared yet — and on a stopped
+   transport that callback never arrives. Fixed by having the timer bail out
+   while a reset is in flight. The hazard was anticipated in §4; the fix for it
+   was not.
+
+2. **Auto-commit never fired on real material.** A vocal produced 2.7 s of
+   gated audio from ~20 s of playback — a ~1:7 ratio — leaving it just under
+   the old 3.0 s floor, and the UI said nothing about why it was idle. The old
+   `learnSeconds` default of 20 s would have needed two and a half minutes of
+   playback. Now: floor 2.0 s, default 10 s, and the UI states what it is
+   waiting for ("needs 0.3 s more audio before it can commit").
+
+The general lesson for Phase 3: **sparse material is the design centre, not the
+edge case.** Vocals are what this gets used on, and every threshold expressed in
+gated seconds behaves very differently there than on a synthetic tone.
 
 **Phase 2 note — the trim arithmetic lives in `core/`, not the processor.**
 `gs::computeTrim()` takes the measurement, target, true peak and ceiling and

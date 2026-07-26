@@ -39,9 +39,13 @@ GainStagerAudioProcessor::createParameterLayout()
     layout.add (std::make_unique<AudioParameterBool> (
         ParameterID { "autoLearn", 1 }, "Auto learn", true));
 
+    // Gated audio, not wall clock. Phase 4 measured a real vocal at roughly a
+    // 1:7 ratio of gated audio to playback time, so 20 s here would have meant
+    // two and a half minutes of playing before it fired. 10 s is the
+    // compromise; dense material still reaches it in about 10 s.
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { "learnSeconds", 1 }, "Learn time",
-        NormalisableRange<float> (5.0f, 120.0f, 1.0f), 20.0f));
+        NormalisableRange<float> (2.0f, 120.0f, 1.0f), 10.0f));
 
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { "ceiling", 1 }, "Ceiling",
@@ -199,6 +203,11 @@ double GainStagerAudioProcessor::measureCurrent() const
     }
 }
 
+double GainStagerAudioProcessor::getLearnSeconds() const
+{
+    return (double) learnSecondsParam->get();
+}
+
 juce::String GainStagerAudioProcessor::getMeasurementUnit() const
 {
     switch (modeParam->getIndex())
@@ -221,14 +230,14 @@ void GainStagerAudioProcessor::requestReset()
 {
     resetPending.store (true);
 
-    // Clear the readouts immediately so the UI reflects the reset even though
-    // the meters themselves are not cleared until the next callback — which,
-    // on a silent track, may not come until playback resumes.
     cachedMeasured.store (gs::LoudnessMeter::silence);
     cachedGatedSeconds.store (0.0);
     cachedTruePeakDb.store (gs::TruePeakMeter::floorDb);
     ceilingLimited.store (false);
 
+    // Reset means start over, so the trim goes too. Leaving it behind showed a
+    // stale figure next to cleared readouts during Phase 4.
+    setParameter (trimParam, 0.0f);
     setParameter (holdParam, 0.0f);
     wasHeld = false;
 }
@@ -277,6 +286,13 @@ void GainStagerAudioProcessor::timerCallback()
         requestReset();
 
     wasHeld = held;
+
+    // While a reset is in flight the meters still hold the old data — the audio
+    // thread clears them, and on a stopped transport that callback may never
+    // come. Reading them here is what made Reset look like it did nothing:
+    // the cleared readouts were overwritten 100 ms later by stale values.
+    if (resetPending.load())
+        return;
 
     if (! held)
     {
