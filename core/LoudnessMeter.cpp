@@ -114,10 +114,15 @@ void LoudnessMeter::prepare (double newSampleRate, int newNumChannels, double ma
         f.prepare (newSampleRate);
 
     hopSumSquares.assign ((size_t) numChannels, 0.0);
+    hopSumSquaresRaw.assign ((size_t) numChannels, 0.0);
     hopHistory.assign ((size_t) numChannels * 4, 0.0);
+    hopHistoryRaw.assign ((size_t) numChannels * 4, 0.0);
+
+    shortTermRing.assign ((size_t) shortTermHops, 0.0);
 
     const auto capacity = std::max<size_t> (16, (size_t) std::lround (maxSeconds * 10.0));
     blockPower.assign (capacity, 0.0);
+    blockPowerRaw.assign (capacity, 0.0);
 
     reset();
 }
@@ -128,15 +133,23 @@ void LoudnessMeter::reset() noexcept
         f.reset();
 
     std::fill (hopSumSquares.begin(), hopSumSquares.end(), 0.0);
+    std::fill (hopSumSquaresRaw.begin(), hopSumSquaresRaw.end(), 0.0);
     std::fill (hopHistory.begin(), hopHistory.end(), 0.0);
+    std::fill (hopHistoryRaw.begin(), hopHistoryRaw.end(), 0.0);
+    std::fill (shortTermRing.begin(), shortTermRing.end(), 0.0);
 
     hopWritePos = 0;
     hopsFilled = 0;
     samplesIntoHop = 0;
 
+    shortTermSum = 0.0;
+    shortTermPos = 0;
+    shortTermFilled = 0;
+    shortTermMaxPower.store (0.0, std::memory_order_relaxed);
+
     blockWritePos = 0;
-    blocksStored = 0;
     wrapped = false;
+    blocksStored.store (0, std::memory_order_release);
 }
 
 void LoudnessMeter::process (const float* const* channels, int numSamples) noexcept
@@ -148,62 +161,113 @@ void LoudnessMeter::process (const float* const* channels, int numSamples) noexc
     {
         for (int ch = 0; ch < numChannels; ++ch)
         {
-            const double y = filters[(size_t) ch].process ((double) channels[ch][n]);
+            const double x = (double) channels[ch][n];
+            const double y = filters[(size_t) ch].process (x);
             hopSumSquares[(size_t) ch] += y * y;
+            hopSumSquaresRaw[(size_t) ch] += x * x;
         }
 
         if (++samplesIntoHop < hopSamples)
             continue;
 
+        //======================================================================
         // Close the hop.
+        double weightedHopPower = 0.0;
+
         for (int ch = 0; ch < numChannels; ++ch)
         {
-            hopHistory[(size_t) hopWritePos * (size_t) numChannels + (size_t) ch]
-                = hopSumSquares[(size_t) ch];
+            const auto slot = (size_t) hopWritePos * (size_t) numChannels + (size_t) ch;
+            hopHistory[slot] = hopSumSquares[(size_t) ch];
+            hopHistoryRaw[slot] = hopSumSquaresRaw[(size_t) ch];
+
+            weightedHopPower += channelWeight (ch)
+                              * (hopSumSquares[(size_t) ch] / (double) hopSamples);
+
             hopSumSquares[(size_t) ch] = 0.0;
+            hopSumSquaresRaw[(size_t) ch] = 0.0;
         }
 
         hopWritePos = (hopWritePos + 1) % 4;
         hopsFilled = std::min (hopsFilled + 1, 4);
         samplesIntoHop = 0;
 
+        //======================================================================
+        // Short-term: rolling 3 s mean over hop powers, tracking the maximum.
+        shortTermSum -= shortTermRing[(size_t) shortTermPos];
+        shortTermRing[(size_t) shortTermPos] = weightedHopPower;
+        shortTermSum += weightedHopPower;
+        shortTermPos = (shortTermPos + 1) % shortTermHops;
+        shortTermFilled = std::min (shortTermFilled + 1, shortTermHops);
+
+        if (shortTermFilled == shortTermHops)
+        {
+            const double stPower = shortTermSum / (double) shortTermHops;
+
+            if (toLoudness (stPower) > absoluteGateLufs
+                && stPower > shortTermMaxPower.load (std::memory_order_relaxed))
+            {
+                shortTermMaxPower.store (stPower, std::memory_order_relaxed);
+            }
+        }
+
         if (hopsFilled < 4)
             continue;
 
+        //======================================================================
         // A full 400 ms window is available; emit one block.
         double weightedPower = 0.0;
+        double rawPower = 0.0;
 
         for (int ch = 0; ch < numChannels; ++ch)
         {
-            double sum = 0.0;
+            double sum = 0.0, sumRaw = 0.0;
+
             for (int h = 0; h < 4; ++h)
-                sum += hopHistory[(size_t) h * (size_t) numChannels + (size_t) ch];
+            {
+                const auto slot = (size_t) h * (size_t) numChannels + (size_t) ch;
+                sum += hopHistory[slot];
+                sumRaw += hopHistoryRaw[slot];
+            }
 
             weightedPower += channelWeight (ch) * (sum / (double) blockSamples);
+            rawPower += sumRaw / (double) blockSamples;
         }
 
+        // Raw is a per-channel mean, so a full-scale sine reads -3.01 dBFS RMS.
+        rawPower /= (double) numChannels;
+
         blockPower[(size_t) blockWritePos] = weightedPower;
+        blockPowerRaw[(size_t) blockWritePos] = rawPower;
         blockWritePos = (blockWritePos + 1) % (int) blockPower.size();
 
         if (blockWritePos == 0)
             wrapped = true;
 
-        blocksStored = wrapped ? (int) blockPower.size() : blockWritePos;
+        // Release: everything written above is visible to a reader that sees
+        // this count.
+        blocksStored.store (wrapped ? (int) blockPower.size() : blockWritePos,
+                            std::memory_order_release);
     }
 }
 
-double LoudnessMeter::integratedLufs() const
+//==============================================================================
+LoudnessMeter::GateResult LoudnessMeter::computeGated() const
 {
-    if (blocksStored <= 0)
-        return silence;
+    GateResult result;
+
+    const int stored = blocksStored.load (std::memory_order_acquire);
+
+    if (stored <= 0)
+        return result;
 
     // Absolute gate.
     double sumAbsolute = 0.0;
     int countAbsolute = 0;
 
-    for (int i = 0; i < blocksStored; ++i)
+    for (int i = 0; i < stored; ++i)
     {
         const double p = blockPower[(size_t) i];
+
         if (toLoudness (p) > absoluteGateLufs)
         {
             sumAbsolute += p;
@@ -212,16 +276,16 @@ double LoudnessMeter::integratedLufs() const
     }
 
     if (countAbsolute == 0)
-        return silence;
+        return result;
 
     // Relative gate, 10 LU below the mean of the survivors.
     const double relativeThreshold =
         toLoudness (sumAbsolute / (double) countAbsolute) - relativeGateLu;
 
-    double sumGated = 0.0;
+    double sumGated = 0.0, sumGatedRaw = 0.0;
     int countGated = 0;
 
-    for (int i = 0; i < blocksStored; ++i)
+    for (int i = 0; i < stored; ++i)
     {
         const double p = blockPower[(size_t) i];
         const double l = toLoudness (p);
@@ -229,52 +293,56 @@ double LoudnessMeter::integratedLufs() const
         if (l > absoluteGateLufs && l > relativeThreshold)
         {
             sumGated += p;
+            sumGatedRaw += blockPowerRaw[(size_t) i];
             ++countGated;
         }
     }
 
     if (countGated == 0)
+        return result;
+
+    result.meanWeighted = sumGated / (double) countGated;
+    result.meanRaw = sumGatedRaw / (double) countGated;
+    result.count = countGated;
+    return result;
+}
+
+double LoudnessMeter::integratedLufs() const
+{
+    const auto gated = computeGated();
+
+    if (gated.count == 0)
         return silence;
 
-    return toLoudness (sumGated / (double) countGated);
+    return toLoudness (gated.meanWeighted);
+}
+
+double LoudnessMeter::rmsDb() const
+{
+    const auto gated = computeGated();
+
+    if (gated.count == 0 || ! (gated.meanRaw > 0.0))
+        return silence;
+
+    return 10.0 * std::log10 (gated.meanRaw);
+}
+
+double LoudnessMeter::shortTermMaxLufs() const
+{
+    const double p = shortTermMaxPower.load (std::memory_order_relaxed);
+    return p > 0.0 ? toLoudness (p) : silence;
 }
 
 double LoudnessMeter::gatedSeconds() const
 {
-    if (blocksStored <= 0)
+    const auto gated = computeGated();
+
+    if (gated.count == 0)
         return 0.0;
-
-    double sumAbsolute = 0.0;
-    int countAbsolute = 0;
-
-    for (int i = 0; i < blocksStored; ++i)
-    {
-        const double p = blockPower[(size_t) i];
-        if (toLoudness (p) > absoluteGateLufs)
-        {
-            sumAbsolute += p;
-            ++countAbsolute;
-        }
-    }
-
-    if (countAbsolute == 0)
-        return 0.0;
-
-    const double relativeThreshold =
-        toLoudness (sumAbsolute / (double) countAbsolute) - relativeGateLu;
-
-    int countGated = 0;
-
-    for (int i = 0; i < blocksStored; ++i)
-    {
-        const double l = toLoudness (blockPower[(size_t) i]);
-        if (l > absoluteGateLufs && l > relativeThreshold)
-            ++countGated;
-    }
 
     // Blocks overlap by 75 %, so each additional gated block represents one hop
     // of new audio, not a whole block. Counting blocks would overstate by 4x.
-    return (double) countGated * ((double) hopSamples / sampleRate);
+    return (double) gated.count * ((double) hopSamples / sampleRate);
 }
 
 } // namespace gs

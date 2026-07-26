@@ -25,6 +25,7 @@ target_compile_definitions(GainStager PUBLIC
 )
 
 target_link_libraries(GainStager PRIVATE
+    gs_core
     juce::juce_audio_utils
     juce::juce_audio_processors
     juce::juce_dsp

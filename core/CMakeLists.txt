@@ -3,6 +3,7 @@
 # future offline CLI would reuse unchanged.
 add_library(gs_core STATIC
     LoudnessMeter.cpp
+    TrimCalculator.cpp
     TruePeakMeter.cpp
 )
 

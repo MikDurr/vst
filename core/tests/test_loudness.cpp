@@ -8,6 +8,7 @@
 // rather than a remembered constant.
 
 #include "../LoudnessMeter.h"
+#include "../TrimCalculator.h"
 #include "../TruePeakMeter.h"
 
 #include <algorithm>
@@ -280,6 +281,78 @@ void testGatedSeconds()
     checkClose (meter.blockSeconds(), 0.4, 1e-12, "block length is 400 ms");
 }
 
+void testAlternateModes()
+{
+    std::printf ("\nAlternate measurement modes\n");
+
+    // Unweighted RMS: a full-scale sine is -3.01 dBFS RMS by definition.
+    {
+        gs::LoudnessMeter meter;
+        meter.prepare (48000.0, 1);
+        feed (meter, makeSine (48000.0, 20.0, 1000.0, 1.0, 1));
+        checkClose (meter.rmsDb(), -3.01, 0.05, "full-scale sine reads -3.01 dBFS RMS");
+    }
+
+    // RMS is unweighted, so unlike LUFS it does not depend on frequency.
+    {
+        gs::LoudnessMeter low, high;
+        low.prepare (48000.0, 2);
+        high.prepare (48000.0, 2);
+        feed (low, makeSine (48000.0, 20.0, 100.0, 0.5, 2));
+        feed (high, makeSine (48000.0, 20.0, 5000.0, 0.5, 2));
+
+        checkClose (high.rmsDb(), low.rmsDb(), 0.05,
+                    "RMS is frequency-independent (unweighted)");
+
+        // ...whereas K-weighting deliberately is not: 5 kHz reads hotter than
+        // 100 Hz for the same amplitude. This is the whole point of the filter.
+        //
+        // Expected spread is about 5.2 dB: the RLB high-pass is roughly -1.2 dB
+        // at 100 Hz, and the shelf is fully +4 dB by 5 kHz. Bracketing it is a
+        // real check on the filter shape; a bare "greater than" would pass even
+        // if the shelf were badly mistuned.
+        const double spread = high.integratedLufs() - low.integratedLufs();
+        std::printf ("        100 Hz = %.3f, 5 kHz = %.3f LUFS (spread %.3f dB)\n",
+                     low.integratedLufs(), high.integratedLufs(), spread);
+        checkClose (spread, 5.2, 0.5, "K-weighting lifts 5 kHz ~5.2 dB over 100 Hz");
+    }
+
+    // Short-term max over a steady tone converges on the integrated value.
+    {
+        gs::LoudnessMeter meter;
+        meter.prepare (48000.0, 2);
+        feed (meter, makeSine (48000.0, 20.0, 1000.0, std::pow (10.0, -23.0 / 20.0), 2));
+        checkClose (meter.shortTermMaxLufs(), -23.0, 0.1,
+                    "short-term max of a steady tone matches integrated");
+    }
+
+    // Short-term max tracks the loudest passage, not the average of both.
+    {
+        auto audio = makeSine (48000.0, 10.0, 1000.0, std::pow (10.0, -33.0 / 20.0), 2);
+        append (audio, makeSine (48000.0, 10.0, 1000.0, std::pow (10.0, -23.0 / 20.0), 2));
+
+        gs::LoudnessMeter meter;
+        meter.prepare (48000.0, 2);
+        feed (meter, audio);
+
+        std::printf ("        quiet+loud: integrated %.3f, short-term max %.3f LUFS\n",
+                     meter.integratedLufs(), meter.shortTermMaxLufs());
+
+        checkClose (meter.shortTermMaxLufs(), -23.0, 0.1, "short-term max finds the loud passage");
+        check (meter.integratedLufs() < meter.shortTermMaxLufs() - 1.0,
+               "integrated sits below short-term max on varying material");
+    }
+
+    // Under 3 s there is no complete short-term window.
+    {
+        gs::LoudnessMeter meter;
+        meter.prepare (48000.0, 2);
+        feed (meter, makeSine (48000.0, 1.0, 1000.0, 0.5, 2));
+        check (meter.shortTermMaxLufs() == gs::LoudnessMeter::silence,
+               "under 3 s yields no short-term result");
+    }
+}
+
 void testTruePeak()
 {
     std::printf ("\nTrue peak\n");
@@ -328,6 +401,133 @@ void testTruePeak()
     check (! std::isnan (tp3.truePeakDb()), "silence does not produce NaN");
 }
 
+void testTrimCalculation()
+{
+    std::printf ("\nTrim calculation\n");
+
+    // Sign and magnitude. Quiet material trims up, loud material trims down.
+    {
+        const auto up = gs::computeTrim (-30.0, -18.0, -40.0, -6.0, true);
+        checkClose (up.trimDb, 12.0, 1e-12, "-30 measured, -18 target -> +12 dB");
+        check (! up.ceilingLimited, "headroom to spare is not flagged as limited");
+
+        const auto down = gs::computeTrim (-10.0, -18.0, -1.0, -6.0, false);
+        checkClose (down.trimDb, -8.0, 1e-12, "-10 measured, -18 target -> -8 dB");
+    }
+
+    // Symmetric clamp.
+    {
+        const auto huge = gs::computeTrim (-60.0, -18.0, -70.0, -6.0, false);
+        checkClose (huge.trimDb, 24.0, 1e-12, "a 42 dB ask clamps to +24 dB");
+
+        const auto tiny = gs::computeTrim (20.0, -18.0, 20.0, -6.0, false);
+        checkClose (tiny.trimDb, -24.0, 1e-12, "a -38 dB ask clamps to -24 dB");
+    }
+
+    // Ceiling. Target wants +12, but the peak is already at -3 dBTP, so the
+    // most that fits under a -6 dBTP ceiling is -3 dB.
+    {
+        const auto limited = gs::computeTrim (-30.0, -18.0, -3.0, -6.0, true);
+        checkClose (limited.trimDb, -3.0, 1e-12, "ceiling backs the trim off to land exactly on it");
+        check (limited.ceilingLimited, "ceiling limiting is reported");
+
+        const auto ignored = gs::computeTrim (-30.0, -18.0, -3.0, -6.0, false);
+        checkClose (ignored.trimDb, 12.0, 1e-12, "ceiling disabled leaves the trim alone");
+        check (! ignored.ceilingLimited, "ceiling disabled is never flagged");
+    }
+
+    // Nothing measured yet must not produce a trim.
+    {
+        const auto none = gs::computeTrim (gs::LoudnessMeter::silence, -18.0, -6.0, -6.0, true);
+        checkClose (none.trimDb, 0.0, 1e-12, "an unmeasured input yields no trim");
+        check (! gs::isValidMeasurement (gs::LoudnessMeter::silence), "silence is not a valid measurement");
+        check (! gs::isValidMeasurement (gs::TruePeakMeter::floorDb), "the peak floor is not a valid measurement");
+        check (gs::isValidMeasurement (-70.0), "-70 dB is a valid measurement");
+    }
+
+    //==========================================================================
+    // End-to-end: measure, compute, apply, re-measure. This is the check that
+    // would catch an inverted sign anywhere in the chain.
+    {
+        const double target = -18.0;
+        auto audio = makeSine (48000.0, 20.0, 1000.0, 0.02, 2);
+
+        gs::LoudnessMeter meter;
+        gs::TruePeakMeter peakMeter;
+        meter.prepare (48000.0, 2);
+        peakMeter.prepare (48000.0, 2);
+        feed (meter, audio);
+
+        std::vector<const float*> ptrs { audio[0].data(), audio[1].data() };
+        peakMeter.process (ptrs.data(), (int) audio[0].size());
+
+        const double measured = meter.integratedLufs();
+        const auto trim = gs::computeTrim (measured, target, peakMeter.truePeakDb(), -6.0, true);
+
+        std::printf ("        measured %.3f LUFS -> trim %+.3f dB\n", measured, trim.trimDb);
+        check (! trim.ceilingLimited, "a -34 LUFS source has room to reach -18");
+
+        const auto gain = (float) std::pow (10.0, trim.trimDb / 20.0);
+        for (auto& channel : audio)
+            for (auto& sample : channel)
+                sample *= gain;
+
+        const double after = measure (audio, 48000.0);
+        std::printf ("        after applying trim: %.3f LUFS\n", after);
+        checkClose (after, target, 0.05, "applying the trim lands on target");
+    }
+
+    // ...and the same round trip in RMS mode, where the target means dBFS.
+    // Amplitude 0.1 is -23.01 dBFS RMS, so +5 dB reaches the target from within
+    // the clamp.
+    {
+        const double target = -18.0;
+        auto audio = makeSine (48000.0, 20.0, 300.0, 0.1, 2);
+
+        gs::LoudnessMeter meter;
+        meter.prepare (48000.0, 2);
+        feed (meter, audio);
+
+        const auto trim = gs::computeTrim (meter.rmsDb(), target, -60.0, -6.0, true);
+        const auto gain = (float) std::pow (10.0, trim.trimDb / 20.0);
+
+        for (auto& channel : audio)
+            for (auto& sample : channel)
+                sample *= gain;
+
+        gs::LoudnessMeter after;
+        after.prepare (48000.0, 2);
+        feed (after, audio);
+
+        checkClose (after.rmsDb(), target, 0.05, "the RMS round trip also lands on target");
+    }
+
+    // A source too quiet to reach the target lands short rather than blowing
+    // past +24 dB. Real behaviour worth pinning: at amplitude 0.01 the source
+    // is -43.01 dBFS RMS, the ask is +25.01, and the clamp leaves it at -19.01.
+    {
+        auto audio = makeSine (48000.0, 20.0, 300.0, 0.01, 2);
+
+        gs::LoudnessMeter meter;
+        meter.prepare (48000.0, 2);
+        feed (meter, audio);
+
+        const auto trim = gs::computeTrim (meter.rmsDb(), -18.0, -60.0, -6.0, true);
+        checkClose (trim.trimDb, 24.0, 1e-6, "an unreachable target clamps at +24 dB");
+
+        const auto gain = (float) std::pow (10.0, trim.trimDb / 20.0);
+        for (auto& channel : audio)
+            for (auto& sample : channel)
+                sample *= gain;
+
+        gs::LoudnessMeter after;
+        after.prepare (48000.0, 2);
+        feed (after, audio);
+
+        checkClose (after.rmsDb(), -19.01, 0.05, "and lands 1 dB short of target, not beyond it");
+    }
+}
+
 } // namespace
 
 int main()
@@ -341,6 +541,8 @@ int main()
     testGating();
     testDegenerateInput();
     testGatedSeconds();
+    testAlternateModes();
+    testTrimCalculation();
     testTruePeak();
 
     std::printf ("\n%d checks, %d failures\n", checks, failures);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <vector>
 #include <cstddef>
 
@@ -50,7 +51,7 @@ private:
 };
 
 //==============================================================================
-/** Gated integrated loudness (LUFS-I) per BS.1770-4 / EBU R128.
+/** Gated loudness measurement per BS.1770-4 / EBU R128.
 
     Mean square over 400 ms blocks at 75 % overlap, then two gates: an absolute
     gate at -70 LUFS, and a relative gate 10 LU below the mean of whatever
@@ -60,15 +61,19 @@ private:
     that is 60 % silence reads catastrophically low on RMS, and a trim computed
     from that would push the track 15 dB into the ceiling.
 
-    `process()` is realtime-safe: no allocation, no locks. Everything is sized
-    in `prepare()`. The gating itself runs in `integratedLufs()`, which is for
-    the message thread.
+    Threading: `process()` is realtime-safe — no allocation, no locks, all
+    storage sized in `prepare()`. The readers below run the gating and are for
+    the message thread. Publication is a single-producer/single-consumer release
+    store on `blocksStored`, so every block the reader can see is fully written.
 */
 class LoudnessMeter
 {
 public:
     /** Returned when there is nothing above the absolute gate. */
     static constexpr double silence = -1000.0;
+
+    /** Hops in the short-term window: 30 x 100 ms = 3 s, per EBU Tech 3341. */
+    static constexpr int shortTermHops = 30;
 
     /** @param maxSeconds  capacity of the block ring; older blocks are dropped. */
     void prepare (double sampleRate, int numChannels, double maxSeconds = 3600.0);
@@ -77,14 +82,25 @@ public:
     /** Realtime-safe. `channels` is an array of `numChannels` pointers. */
     void process (const float* const* channels, int numSamples) noexcept;
 
-    /** Gated integrated loudness in LUFS, or `silence`. Message thread. */
+    //==========================================================================
+    // Readers. Message thread.
+
+    /** Gated integrated loudness in LUFS, or `silence`. */
     double integratedLufs() const;
 
+    /** Loudest 3 s short-term window seen, in LUFS, or `silence`. Tracked
+        incrementally on the audio thread rather than from the block history. */
+    double shortTermMaxLufs() const;
+
+    /** Unweighted RMS in dBFS over the same gated block selection as
+        `integratedLufs()`, for traditional -18 dBFS RMS staging. */
+    double rmsDb() const;
+
     /** Seconds of audio that survived both gates — the honest measure of how
-        much the plugin has actually learned from. Message thread. */
+        much has actually been learned from, and what drives auto-commit. */
     double gatedSeconds() const;
 
-    int blocksMeasured() const noexcept { return blocksStored; }
+    int blocksMeasured() const noexcept { return blocksStored.load (std::memory_order_acquire); }
     double blockSeconds() const noexcept { return blockLengthSeconds; }
 
 private:
@@ -94,6 +110,16 @@ private:
 
     static double toLoudness (double weightedPower) noexcept;
 
+    struct GateResult
+    {
+        double meanWeighted = 0.0;
+        double meanRaw = 0.0;
+        int count = 0;
+    };
+
+    /** Runs both gates once. Every public reader is a view onto this. */
+    GateResult computeGated() const;
+
     double sampleRate = 0.0;
     int numChannels = 0;
 
@@ -101,19 +127,29 @@ private:
     int blockSamples = 0;        // 400 ms == 4 hops, giving exact 75 % overlap
     double blockLengthSeconds = 0.0;
 
-    std::vector<KFilter> filters;      // one per channel
-    std::vector<double> hopSumSquares; // running sum for the current hop, per channel
-    std::vector<double> hopHistory;    // [hopIndex * numChannels + ch], 4 hops
+    std::vector<KFilter> filters;         // one per channel
+    std::vector<double> hopSumSquares;    // K-weighted, current hop, per channel
+    std::vector<double> hopSumSquaresRaw; // unweighted, current hop, per channel
+    std::vector<double> hopHistory;       // [hop * numChannels + ch], 4 hops
+    std::vector<double> hopHistoryRaw;
     int hopWritePos = 0;
     int hopsFilled = 0;
     int samplesIntoHop = 0;
 
-    // One weighted power value per 400 ms block. Storing the channel-weighted
-    // sum rather than per-channel values is exact: the gating means are linear
-    // in z, so sum-then-mean and mean-then-sum agree.
+    // Rolling 3 s window for short-term, kept as a running sum over hop powers.
+    std::vector<double> shortTermRing;
+    double shortTermSum = 0.0;
+    int shortTermPos = 0;
+    int shortTermFilled = 0;
+    std::atomic<double> shortTermMaxPower { 0.0 };
+
+    // One value per 400 ms block. Storing the channel-weighted sum rather than
+    // per-channel values is exact: the gating means are linear in z, so
+    // sum-then-mean and mean-then-sum agree.
     std::vector<double> blockPower;
+    std::vector<double> blockPowerRaw;
     int blockWritePos = 0;
-    int blocksStored = 0;
+    std::atomic<int> blocksStored { 0 };
     bool wrapped = false;
 };
 

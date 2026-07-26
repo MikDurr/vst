@@ -1,21 +1,34 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+
+#include "LoudnessMeter.h"
+#include "TrimCalculator.h"
+#include "TruePeakMeter.h"
+
 #include <atomic>
 
 //==============================================================================
-// Phase 0: passthrough only. No metering, no gain, no parameters yet.
-//
-// Its job is to prove the AU shell is sound — auval passes, Logic loads it,
-// zero reported latency — and to report back what the host actually hands us.
-// The sample rate in particular matters: the K-weighting coefficients in
-// Phase 1 have to be derived at whatever rate this reports, not hardcoded at
-// 48 kHz. See PLAN.md §2.
-class GainStagerAudioProcessor final : public juce::AudioProcessor
+/** Auto gain staging: measure the track, apply one static trim, stop.
+
+    Deliberately not dynamic. Anything that adjusts gain continuously over time
+    is a leveler — it pumps, it fights the compressor after it, and it is a
+    different plugin. See PLAN.md §0.
+*/
+class GainStagerAudioProcessor final : public juce::AudioProcessor,
+                                       private juce::Timer
 {
 public:
+    enum class State { Idle, Learn, Hold };
+
+    /** Auto-commit fires once this much gated audio has accumulated, or once
+        the callbacks stop for `transportIdleMs` with at least
+        `minimumGatedSeconds` in hand. */
+    static constexpr int transportIdleMs = 1500;
+    static constexpr double minimumGatedSeconds = 3.0;
+
     GainStagerAudioProcessor();
-    ~GainStagerAudioProcessor() override = default;
+    ~GainStagerAudioProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -30,6 +43,7 @@ public:
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
+    juce::AudioProcessorParameter* getBypassParameter() const override { return bypassParam; }
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -41,21 +55,85 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     //==========================================================================
-    // Read by the editor. Written from the audio thread, so all atomic.
+    // UI-facing. All message thread.
+
+    juce::AudioProcessorValueTreeState apvts;
+
+    /** Drop everything learned so far and re-arm. */
+    void requestReset();
+
+    /** Commit whatever has been measured right now, regardless of duration. */
+    void commitNow();
+
+    State getState() const noexcept;
+
+    double getMeasured() const noexcept      { return cachedMeasured.load(); }
+    double getGatedSeconds() const noexcept  { return cachedGatedSeconds.load(); }
+    double getTruePeakDb() const noexcept    { return cachedTruePeakDb.load(); }
+    bool isCeilingLimited() const noexcept   { return ceilingLimited.load(); }
+
+    /** Units of the current mode: LUFS for the loudness modes, dBFS otherwise. */
+    juce::String getMeasurementUnit() const;
+
     double getPreparedSampleRate() const noexcept { return preparedSampleRate.load(); }
     int    getPreparedBlockSize()  const noexcept { return preparedBlockSize.load(); }
     int    getActiveChannels()     const noexcept { return activeChannels.load(); }
     float  getPeakSinceLastRead() noexcept        { return peakSinceLastRead.exchange (0.0f); }
-    int    getBlockCount()         const noexcept { return blockCount.load(); }
+
+    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
 private:
     static BusesProperties getBusesProperties();
+
+    void timerCallback() override;
+
+    /** The measurement the current mode cares about. Message thread. */
+    double measureCurrent() const;
+
+    /** Computes and stores the trim, then latches Hold. Message thread. */
+    void commit();
+
+    void setParameter (juce::RangedAudioParameter* param, float value);
+
+    //==========================================================================
+    gs::LoudnessMeter meter;
+    gs::TruePeakMeter truePeak;
+
+    juce::SmoothedValue<float> gainSmoother;
+
+    // Cached parameter pointers, looked up once.
+    juce::AudioParameterFloat*  targetParam = nullptr;
+    juce::AudioParameterChoice* modeParam = nullptr;
+    juce::AudioParameterFloat*  trimParam = nullptr;
+    juce::AudioParameterBool*   holdParam = nullptr;
+    juce::AudioParameterBool*   autoLearnParam = nullptr;
+    juce::AudioParameterFloat*  learnSecondsParam = nullptr;
+    juce::AudioParameterFloat*  ceilingParam = nullptr;
+    juce::AudioParameterBool*   ceilingEnabledParam = nullptr;
+    juce::AudioParameterBool*   bypassParam = nullptr;
+
+    // Audio thread performs the reset, because clearing the meter's buffers
+    // from the message thread while process() is reading them is a race. It is
+    // a one-off memset, cheap next to a block's budget.
+    std::atomic<bool> resetPending { false };
+
+    // Phase 0 finding: Logic stops calling processBlock entirely on a silent
+    // track, so a stopped transport and a silent track are indistinguishable
+    // from the audio thread. Transport-idle is therefore inferred from the age
+    // of the last callback, on the message thread.
+    std::atomic<juce::uint32> lastBlockMs { 0 };
+
+    std::atomic<double> cachedMeasured { gs::LoudnessMeter::silence };
+    std::atomic<double> cachedGatedSeconds { 0.0 };
+    std::atomic<double> cachedTruePeakDb { gs::TruePeakMeter::floorDb };
+    std::atomic<bool> ceilingLimited { false };
+
+    bool wasHeld = false;
 
     std::atomic<double> preparedSampleRate { 0.0 };
     std::atomic<int>    preparedBlockSize  { 0 };
     std::atomic<int>    activeChannels     { 0 };
     std::atomic<float>  peakSinceLastRead  { 0.0f };
-    std::atomic<int>    blockCount         { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GainStagerAudioProcessor)
 };

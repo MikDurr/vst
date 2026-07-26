@@ -263,13 +263,30 @@ the right bar rather than ±0.2.
 
 ## 6. Phases
 
-| Phase | Work | Est. |
+| Phase | Work | Status |
 |---|---|---|
-| **0** | Repo, CMake pointing at shared JUCE, hello-world AU passing `auval` | ½ day |
-| **1** | `core/` loudness engine + reference tests (§5). No plugin work. | 1 day |
-| **2** | Processor: state machine, params, persistence, ring buffer | 1 day |
-| **3** | Native JUCE editor — big LUFS readout, trim readout, target field, Learn/Hold/Reset, gated-audio progress, ceiling-limited warning | ½ day |
-| **4** | Validation in Logic on a real session | ½ day |
+| **0** | Repo, CMake pointing at shared JUCE, hello-world AU passing `auval` | **done** |
+| **1** | `core/` loudness engine + reference tests (§5). No plugin work. | **done** — 58/58 |
+| **2** | Processor: state machine, params, persistence, ring buffer | **done** — `auval` green |
+| **3** | Native JUCE editor — big LUFS readout, trim readout, target field, Learn/Hold/Reset, gated-audio progress, ceiling-limited warning | next |
+| **4** | Validation in Logic on a real session | pending |
+
+**Phase 2 note — the trim arithmetic lives in `core/`, not the processor.**
+`gs::computeTrim()` takes the measurement, target, true peak and ceiling and
+returns the trim plus a ceiling-limited flag. Putting it behind the JUCE
+boundary would have made the single most consequential calculation in the
+plugin untestable, and a sign error there is silent and wrecks a mix. It is
+covered end-to-end: measure a signal, compute, apply, re-measure, land on
+target to within 0.001 dB.
+
+Two behaviours pinned by those tests, both intentional:
+
+- A source too quiet to reach the target **lands short rather than exceeding
+  ±24 dB**. At -43 dBFS RMS against a -18 target the ask is +25.01 and the
+  result is +24, finishing 1 dB low.
+- The ceiling **backs the trim off to land exactly on the ceiling** and raises
+  a flag. Under-trimming without saying so would leave the track quieter than
+  the readout claims.
 
 Phase 1 is the one with real content. Do not start Phase 2 until the reference
 tests pass — a meter that is quietly 2 dB off produces a tool that is worse
