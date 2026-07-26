@@ -34,6 +34,29 @@ target_link_libraries(GainStager PRIVATE
     juce::juce_recommended_warning_flags
 )
 
+# Renders the editor to PNGs with no host involved, so a UI change can be
+# reviewed without disturbing a real session. See tools/ui_snapshot.cpp.
+juce_add_console_app(ui_snapshot PRODUCT_NAME "ui_snapshot")
+
+target_sources(ui_snapshot PRIVATE tools/ui_snapshot.cpp)
+
+target_link_libraries(ui_snapshot PRIVATE
+    GainStager
+    gs_core
+    juce::juce_audio_utils
+    juce::juce_audio_processors
+    juce::juce_dsp
+    juce::juce_gui_basics
+    juce::juce_recommended_config_flags
+)
+
+target_compile_definitions(ui_snapshot PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_STANDALONE_APPLICATION=1
+    JUCE_MODAL_LOOPS_PERMITTED=1
+)
+
 # Logic will not load an unsigned component. JUCE's COPY_PLUGIN_AFTER_BUILD step
 # is itself a POST_BUILD command registered earlier, so by the time this runs the
 # bundle is already installed and both copies need the ad-hoc signature.

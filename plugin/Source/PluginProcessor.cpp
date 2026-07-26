@@ -28,10 +28,13 @@ GainStagerAudioProcessor::createParameterLayout()
         StringArray { "Integrated (LUFS-I)", "Short-term max", "RMS", "True peak" }, 0));
 
     // The output of the measurement, but user-editable so a reading can be
-    // nudged by hand without re-learning.
+    // nudged by hand without re-learning. The near-zero snap stops a value a
+    // hair below zero from displaying as "-0.00".
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { "trim", 1 }, "Trim",
-        NormalisableRange<float> (-24.0f, 24.0f, 0.01f), 0.0f));
+        NormalisableRange<float> (-24.0f, 24.0f, 0.01f), 0.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction (
+            [] (float v, int) { return String (std::abs (v) < 0.005f ? 0.0f : v, 2); })));
 
     layout.add (std::make_unique<AudioParameterBool> (
         ParameterID { "hold", 1 }, "Hold", false));

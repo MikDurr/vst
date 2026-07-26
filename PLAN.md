@@ -268,8 +268,43 @@ the right bar rather than ±0.2.
 | **0** | Repo, CMake pointing at shared JUCE, hello-world AU passing `auval` | **done** |
 | **1** | `core/` loudness engine + reference tests (§5). No plugin work. | **done** — 58/58 |
 | **2** | Processor: state machine, params, persistence, ring buffer | **done** — `auval` green |
-| **3** | Native JUCE editor — big LUFS readout, trim readout, target field, Learn/Hold/Reset, gated-audio progress, ceiling-limited warning | next |
+| **3** | Native JUCE editor — big LUFS readout, trim readout, target field, Learn/Hold/Reset, gated-audio progress, ceiling-limited warning | **done** |
 | **4** | Validation in Logic on a real session | **done** |
+
+### Phase 3 result: the editor, and a way to look at it
+
+Custom `LookAndFeel`, 470 x 464. Two numbers carry the panel — **measured** and
+**trim** — and they are the only large type on it. The trim greys out whenever
+it is not actually being applied, so the panel never implies the audio is being
+changed when it is not.
+
+Everything else on it exists because Phase 4 found it missing:
+
+- **Learn progress bar**, with a notch at the commit-on-stop threshold. A silent
+  LEARN state was indistinguishable from a stuck one, and without the notch the
+  bar suggests nothing can happen until it reaches the far end.
+- **A status line that is never blank** — "needs 0.3 s more audio before it can
+  commit" is the sentence whose absence cost an afternoon.
+- **The ceiling warning recolours the whole status panel** rather than adding a
+  quiet line, and names the numbers: source peak, and the ceiling the full trim
+  would have crossed.
+
+**`plugin/tools/ui_snapshot.cpp` renders the editor to PNGs with no host.** It
+drives the processor directly, pumps the message loop so the timers fire, and
+writes one image per state (idle / learning / holding / ceiling-limited).
+Reviewing a UI change previously meant inserting into a live Logic session,
+which is disruptive and not repeatable — this is neither. Run it after any UI
+change:
+
+```
+cmake --build build --target ui_snapshot
+./build/plugin/ui_snapshot_artefacts/RelWithDebInfo/ui_snapshot <out-dir>
+```
+
+Two defects it caught immediately that a compile could not: a ~90 px dead zone
+where a usually-absent warning banner was being reserved, and an em-dash in a
+drawn string rendering as mojibake. **Keep drawn strings ASCII** — the `char*`
+is not read back as UTF-8.
 
 ### Phase 4 result (resolved 2026-07-26): correct to 0.01 dB, after two fixes
 
