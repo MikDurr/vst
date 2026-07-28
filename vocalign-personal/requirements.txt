@@ -1,0 +1,11 @@
+# Runtime deps for the vocalign standalone app.
+librosa>=0.10          # audio loading, mel features, DTW
+numpy>=1.24
+scipy>=1.10
+soundfile>=0.12
+audioread>=3.0
+praat-parselmouth>=0.4 # PSOLA renderer (the default — chosen by blind listening)
+pyworld>=0.3           # WORLD renderer (embeddable alternative, kept for A/B)
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9  # multipart form uploads for the /api/align endpoint

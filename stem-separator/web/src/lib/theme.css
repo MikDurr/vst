@@ -1,0 +1,124 @@
+/* stemsep design tokens — deliberately the same ground as vocalign, so the two
+   read as one family of tools when they're open side by side.
+
+   Dark because this sits open beside Logic while mixing, in a dim room: a light
+   surface next to a dark DAW reads as "webpage", not "tool".
+
+   Colour strategy is Committed rather than Restrained, and for the same reason
+   as vocalign: the stem hues ARE the information architecture. You identify a
+   lane by its colour before you read its label, and the same hue then carries
+   through the solo button, the meter, and the download row. Saturation here is
+   functional identification, not decoration. */
+
+:root {
+	/* Surfaces — near-black with a violet cast, so the stem hues sit on a
+	   related ground rather than fighting a neutral gray. */
+	--bg: oklch(0.17 0.025 288);
+	--surface: oklch(0.21 0.028 288);
+	--surface-raised: oklch(0.25 0.03 288);
+	--surface-sunken: oklch(0.13 0.022 288);
+	--line: oklch(0.31 0.03 288);
+	--line-soft: oklch(0.26 0.028 288);
+
+	/* Ink */
+	--ink: oklch(0.96 0.005 288);
+	--ink-dim: oklch(0.76 0.015 288);
+	--ink-muted: oklch(0.62 0.02 288); /* 4.6:1 on --surface — checked */
+	--ink-faint: oklch(0.5 0.02 288); /* decorative/disabled only, never body */
+
+	/* Stem identity — the functional palette. Four maximally separable hues,
+	   all held at a similar lightness so no lane looks louder than another. */
+	--source: oklch(0.68 0.02 288); /* neutral   — the untouched mix */
+	--vocals: oklch(0.86 0.15 95); /* yellow    */
+	--drums: oklch(0.71 0.17 32); /* coral     */
+	--bass: oklch(0.76 0.15 155); /* green     */
+	--other: oklch(0.7 0.16 289); /* violet    */
+	--instrumental: oklch(0.75 0.12 220); /* cyan — the 2-stem no_vocals lane */
+
+	/* Accent: primary action + active state only */
+	--accent: oklch(0.6 0.19 288);
+	--accent-hover: oklch(0.66 0.2 288);
+	--accent-ink: oklch(0.98 0.01 288);
+
+	/* Semantic */
+	--ok: oklch(0.75 0.16 162);
+	--warn: oklch(0.8 0.14 78);
+	--danger: oklch(0.68 0.19 22);
+
+	/* Type — one family; product UI doesn't need pairing */
+	--font: ui-sans-serif, -apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+	--font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+
+	/* Fixed rem scale (1.2 ratio) — not fluid; this is a fixed-DPI tool */
+	--t-micro: 0.6875rem; /* 11px — panel labels */
+	--t-small: 0.8125rem; /* 13px */
+	--t-body: 0.875rem; /* 14px */
+	--t-lg: 1.0625rem;
+	--t-xl: 1.375rem;
+
+	--r-sm: 4px;
+	--r-md: 7px;
+	--r-lg: 11px;
+
+	/* Semantic z-scale — never arbitrary values */
+	--z-base: 1;
+	--z-sticky: 10;
+	--z-dropdown: 20;
+	--z-overlay: 30;
+	--z-toast: 40;
+
+	--ease: cubic-bezier(0.22, 1, 0.36, 1); /* ease-out-quart */
+	--fast: 140ms;
+	--med: 220ms;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+	background: var(--bg);
+	color: var(--ink);
+	font-family: var(--font);
+	font-size: 16px;
+	-webkit-font-smoothing: antialiased;
+}
+
+/* The uppercase micro-label used throughout the control panel. This is a
+   plugin convention (every hardware-derived audio UI uses it), not the
+   decorative section-eyebrow trope — it labels controls, not sections. */
+.mlabel {
+	font-size: var(--t-micro);
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: var(--ink-muted);
+	line-height: 1;
+}
+
+button {
+	font: inherit;
+	cursor: pointer;
+}
+button:disabled {
+	cursor: not-allowed;
+}
+
+:where(button, input, select, [tabindex]):focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+	border-radius: var(--r-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
+}

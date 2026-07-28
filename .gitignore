@@ -1,0 +1,41 @@
+# --- environments and build output ---
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+.svelte-kit/
+build/
+dist/
+*.egg-info/
+
+# --- vendored SDKs ---
+# JUCE and the ARA SDK are ~100 MB of third-party source that anyone can fetch
+# themselves. Keeping them out of the repo matters more than the convenience of
+# a one-step clone.
+third_party/
+
+# --- audio ---
+# Deliberately broad. Both tools take commercial recordings as input and write
+# stems and renders next to them, and audio that lands in git history cannot be
+# removed by deleting it later. Nothing here is code, so nothing is lost.
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.ogg
+*.aac
+*.aif
+*.aiff
+*.mov
+*.mp4
+test_input/
+test_output/
+stems/
+library/
+
+# vocalign-personal had its own repo with zero commits; it was moved aside
+# rather than deleted so the change stays reversible. It is not content.
+.git.disabled-by-claude/
+
+# --- macOS ---
+.DS_Store

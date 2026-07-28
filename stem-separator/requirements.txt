@@ -1,0 +1,18 @@
+# Runtime deps for the stemsep standalone app.
+
+# --- always needed -----------------------------------------------------------
+numpy>=1.24
+scipy>=1.10
+soundfile>=0.12
+librosa>=0.10          # audio loading + the Quick engine's REPET-SIM filter
+audioread>=3.0
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9  # multipart form uploads for /api/separate
+
+# --- the Demucs engine -------------------------------------------------------
+# Pulls in PyTorch, which is roughly 2 GB. The app runs without these: the API
+# reports demucs:false and the UI falls back to the Quick engine, so install
+# them only when you want real stems.
+demucs>=4.0
+torch>=2.1
