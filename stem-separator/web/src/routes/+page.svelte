@@ -231,6 +231,26 @@
 		player.applyMix(soloed, muted);
 	}
 
+	/** "Play just this one" — the question people actually arrive with. Solos
+	 *  the stem and starts the transport in a single click, and stops on a
+	 *  second click. Solo rather than mute-the-others so it composes with the
+	 *  S/M buttons instead of fighting them. */
+	async function soloPlay(name: string) {
+		if (isPlayingAlone(name)) {
+			player.pause();
+			playing = false;
+			return;
+		}
+		soloed = new Set([name]);
+		player.applyMix(soloed, muted);
+		if (!player.playing) await player.play();
+		playing = player.playing;
+	}
+
+	function isPlayingAlone(name: string): boolean {
+		return playing && soloed.size === 1 && soloed.has(name);
+	}
+
 	function clearMix() {
 		soloed = new Set();
 		muted = new Set();
@@ -322,6 +342,8 @@
 					playhead={playFrac}
 					onSolo={() => toggleSolo(lane.name)}
 					onMute={() => toggleMute(lane.name)}
+					onPlay={() => soloPlay(lane.name)}
+					playingSolo={isPlayingAlone(lane.name)}
 					onSeek={seekFrac}
 				>
 					{#snippet action()}

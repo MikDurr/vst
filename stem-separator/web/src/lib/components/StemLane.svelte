@@ -17,6 +17,12 @@
 		muted?: boolean;
 		onSolo?: (() => void) | null;
 		onMute?: (() => void) | null;
+		/** Play *only* this stem. The solo/mute pair is the DAW-literate way to
+		 *  do this, but "play just this one" is the question people actually
+		 *  arrive with, and two unlabelled letters don't answer it. */
+		onPlay?: (() => void) | null;
+		/** This stem is currently the only thing audible, and playing. */
+		playingSolo?: boolean;
 		/** Fraction 0..1 of the lane width that was clicked. */
 		onSeek?: ((frac: number) => void) | null;
 		/** Supplying this makes the lane a drop target instead. */
@@ -37,6 +43,8 @@
 		muted = false,
 		onSolo = null,
 		onMute = null,
+		onPlay = null,
+		playingSolo = false,
 		onSeek = null,
 		onDropFile = null,
 		action = null,
@@ -138,6 +146,17 @@
 	<div class="lane-head">
 		<span class="dot" style:background={color}></span>
 		<span class="lane-name">{name}</span>
+		{#if onPlay}
+			<button
+				class="solo-play"
+				style:--lane={color}
+				onclick={onPlay}
+				aria-label={playingSolo ? `Stop ${name}` : `Play ${name} alone`}
+				title={playingSolo ? `Stop ${name}` : `Play ${name} alone`}
+			>
+				{#if playingSolo}<span class="ico-pause"></span>{:else}<span class="ico-play"></span>{/if}
+			</button>
+		{/if}
 		{#if onSolo || onMute}
 			<div class="sm">
 				{#if onSolo}
@@ -250,6 +269,49 @@
 		margin-left: auto;
 		display: flex;
 		gap: 3px;
+	}
+	/* When the play button is present it takes the auto margin, and the S/M
+	   pair sits tight beside it — two auto margins in one flex row would split
+	   the free space and push them apart. */
+	.solo-play {
+		margin-left: auto;
+		width: 22px;
+		height: 22px;
+		flex: none;
+		display: grid;
+		place-items: center;
+		border: 1px solid var(--line);
+		border-radius: 50%;
+		background: var(--surface-sunken);
+		color: var(--lane);
+		transition:
+			background var(--fast) var(--ease),
+			border-color var(--fast) var(--ease),
+			color var(--fast) var(--ease);
+	}
+	.solo-play:hover {
+		border-color: var(--lane);
+		background: var(--surface-raised);
+	}
+	.solo-play + .sm {
+		margin-left: 6px;
+	}
+	/* Drawn rather than glyphs: ▶ and ❚❚ sit on different baselines and at
+	   different optical weights across platforms, so the button would shift as
+	   it toggles. */
+	.ico-play {
+		width: 0;
+		height: 0;
+		border-left: 7px solid currentColor;
+		border-top: 4.5px solid transparent;
+		border-bottom: 4.5px solid transparent;
+		margin-left: 2px;
+	}
+	.ico-pause {
+		width: 7px;
+		height: 8px;
+		border-left: 2.5px solid currentColor;
+		border-right: 2.5px solid currentColor;
 	}
 	.lane-action {
 		display: flex;
