@@ -108,6 +108,7 @@ private:
     double truePeakDb = 0.0;
     double learnSeconds = 0.0;
     double ceilingDb = 0.0;
+    double requestedTrimDb = 0.0;
     bool ceilingLimited = false;
     bool resetPending = false;
     juce::String unit { "LUFS" };

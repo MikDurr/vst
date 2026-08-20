@@ -369,18 +369,16 @@ void GainStagerAudioProcessorEditor::paintReadouts (juce::Graphics& g, juce::Rec
 
 void GainStagerAudioProcessorEditor::paintStatus (juce::Graphics& g, juce::Rectangle<int> area)
 {
-    // A ceiling-limited trim is a mix that is wrong without looking wrong, so
-    // the warning recolours the whole panel rather than adding a quiet line.
+    // A capped trim is NOT an error -- the plugin still did its job, it just
+    // could not go the whole way. It gets an amber accent, not a red alarm:
+    // red read as "something broke" when nothing had.
+    fillPanel (g, area);
+
     if (ceilingLimited)
     {
-        g.setColour (theme::warning.withAlpha (0.12f));
-        g.fillRoundedRectangle (area.toFloat(), 6.0f);
-        g.setColour (theme::warning.withAlpha (0.55f));
-        g.drawRoundedRectangle (area.toFloat().reduced (0.5f), 6.0f, 1.0f);
-    }
-    else
-    {
-        fillPanel (g, area);
+        auto accent = area.reduced (1).withWidth (3);
+        g.setColour (theme::learn.withAlpha (0.85f));
+        g.fillRoundedRectangle (accent.toFloat(), 1.5f);
     }
 
     auto inner = area.reduced (16, 11);
@@ -429,19 +427,22 @@ void GainStagerAudioProcessorEditor::paintStatus (juce::Graphics& g, juce::Recta
         // Ceiling limiting can only be set at commit, so this always coexists
         // with HOLD and there is room for both lines.
         auto first = inner.removeFromTop (inner.getHeight() / 2);
+        inner.removeFromLeft (8);
+        first.removeFromLeft (8);
 
         // Plain ASCII only in drawn strings: a literal em-dash here rendered as
         // mojibake, since the char* is not read back as UTF-8.
-        g.setColour (theme::warning);
+        g.setColour (theme::learn);
         g.setFont (sans (11.5f, juce::Font::bold));
-        g.drawText ("Trim held back by the ceiling: target not reached",
+        g.drawText ("Applied " + signedDb (trimDb) + " dB of the "
+                        + signedDb (requestedTrimDb) + " dB the target asked for",
                     first, juce::Justification::centredLeft);
 
-        g.setColour (theme::warning.withAlpha (0.75f));
+        g.setColour (theme::textDim);
         g.setFont (sans (11.0f));
-        g.drawText ("Source peaks at " + juce::String (truePeakDb, 2)
-                        + " dBTP; the full trim would have passed "
-                        + juce::String (ceilingDb, 1) + " dBTP",
+        g.drawText ("The rest would have peaked at "
+                        + juce::String (truePeakDb + requestedTrimDb, 1)
+                        + " dBTP, past the " + juce::String (ceilingDb, 1) + " ceiling.",
                     inner, juce::Justification::centredLeft);
         return;
     }
@@ -522,6 +523,7 @@ void GainStagerAudioProcessorEditor::timerCallback()
     const auto newPeak = processorRef.getTruePeakDb();
     const auto newLearn = processorRef.getLearnSeconds();
     const auto newCeiling = (double) *processorRef.apvts.getRawParameterValue ("ceiling");
+    const auto newRequested = processorRef.getRequestedTrimDb();
     const auto newLimited = processorRef.isCeilingLimited();
     const auto newReset = processorRef.isResetPending();
     const auto newUnit = processorRef.getMeasurementUnit();
@@ -540,6 +542,7 @@ void GainStagerAudioProcessorEditor::timerCallback()
                       || ! juce::exactlyEqual (newPeak, truePeakDb)
                       || ! juce::exactlyEqual (newLearn, learnSeconds)
                       || ! juce::exactlyEqual (newCeiling, ceilingDb)
+                      || ! juce::exactlyEqual (newRequested, requestedTrimDb)
                       || newLimited != ceilingLimited
                       || newReset != resetPending
                       || newUnit != unit;
@@ -554,6 +557,7 @@ void GainStagerAudioProcessorEditor::timerCallback()
     truePeakDb = newPeak;
     learnSeconds = newLearn;
     ceilingDb = newCeiling;
+    requestedTrimDb = newRequested;
     ceilingLimited = newLimited;
     resetPending = newReset;
     unit = newUnit;

@@ -274,6 +274,7 @@ void GainStagerAudioProcessor::commit()
                                          maxTrimDb);
 
     ceilingLimited.store (result.ceilingLimited);
+    cachedRequestedTrim.store (result.requestedTrimDb);
     cachedMeasured.store (measured);
 
     committedTarget = targetParam->get();
@@ -330,6 +331,7 @@ void GainStagerAudioProcessor::recomputeTrimFromCommitted()
                                          maxTrimDb);
 
     ceilingLimited.store (result.ceilingLimited);
+    cachedRequestedTrim.store (result.requestedTrimDb);
     committedTarget = targetParam->get();
     committedCeiling = ceilingParam->get();
     committedCeilingEnabled = ceilingEnabledParam->get();

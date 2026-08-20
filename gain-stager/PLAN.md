@@ -294,9 +294,13 @@ Everything else on it exists because Phase 4 found it missing:
   bar suggests nothing can happen until it reaches the far end.
 - **A status line that is never blank** — "needs 0.3 s more audio before it can
   commit" is the sentence whose absence cost an afternoon.
-- **The ceiling warning recolours the whole status panel** rather than adding a
-  quiet line, and names the numbers: source peak, and the ceiling the full trim
-  would have crossed.
+- **The ceiling notice is a note, not an alarm.** It was first drawn as a red
+  banner reading "target not reached", and a real user read that as a failure —
+  reasonably, because red plus the word "not" is what an error looks like.
+  Nothing has failed: the plugin still raised the level, it just could not go
+  the whole way. It now gets an amber left accent on the normal panel and leads
+  with what it did: "Applied +7.98 dB of the +9.94 dB the target asked for",
+  then the reason underneath.
 
 **`plugin/tools/ui_snapshot.cpp` renders the editor to PNGs with no host.** It
 drives the processor directly, pumps the message loop so the timers fire, and

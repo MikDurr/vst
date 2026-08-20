@@ -24,6 +24,7 @@ TrimResult computeTrim (double measured,
 
     const double targetTrim = std::clamp (target - measured, -maxTrimDb, maxTrimDb);
     result.trimDb = targetTrim;
+    result.requestedTrimDb = targetTrim;
 
     if (! (ceilingEnabled && isValidMeasurement (truePeakDb)))
         return result;

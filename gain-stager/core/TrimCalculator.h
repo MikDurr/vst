@@ -11,6 +11,10 @@ struct TrimResult
 {
     double trimDb = 0.0;
 
+    /** What the target alone asked for, before any ceiling cap. The UI shows
+        both so a capped trim reads as "got this far" rather than as a failure. */
+    double requestedTrimDb = 0.0;
+
     /** True when the true-peak ceiling forced a smaller trim than the target
         asked for. The UI must surface this rather than silently under-trimming. */
     bool ceilingLimited = false;

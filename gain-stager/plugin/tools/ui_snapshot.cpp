@@ -125,6 +125,7 @@ int main (int argc, char** argv)
     //    the target and the ceiling and the trim has to be backed off.
     {
         Rig rig;
+        rig.setParam ("ceiling", -6.0f);   // -1 default no longer caps this source
         feed (rig.processor, 20.0, 0.2, 12.0);
         pump (200);
         rig.processor.commitNow();

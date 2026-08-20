@@ -80,6 +80,9 @@ public:
     double getTruePeakDb() const noexcept    { return cachedTruePeakDb.load(); }
     bool isCeilingLimited() const noexcept   { return ceilingLimited.load(); }
 
+    /** What the target alone asked for, before the ceiling capped it. */
+    double getRequestedTrimDb() const noexcept { return cachedRequestedTrim.load(); }
+
     /** Units of the current mode: LUFS for the loudness modes, dBFS otherwise. */
     juce::String getMeasurementUnit() const;
 
@@ -143,6 +146,7 @@ private:
     std::atomic<double> cachedGatedSeconds { 0.0 };
     std::atomic<double> cachedTruePeakDb { gs::TruePeakMeter::floorDb };
     std::atomic<bool> ceilingLimited { false };
+    std::atomic<double> cachedRequestedTrim { 0.0 };
 
     bool wasHeld = false;
     int currentProgram = 0;
