@@ -426,6 +426,63 @@ This drove three changes:
    synth sit within 1.5 dB of each other on both crest and gating, so inventing
    a difference would be dishonest.
 
+### Audit (2026-08-19)
+
+A full pass over build, tests, threading, and behaviour. Everything below was
+found by the audit, not by use.
+
+**Build.** Clean-room rebuild is warning-free in `core/` and `plugin/`. Four
+real warnings were fixed: a private `setParameter` helper shadowing
+`AudioProcessor`'s deprecated virtual of the same name (renamed
+`setParamValue`), an unused parameter, an implicit int-to-float narrowing, and
+six float-equality comparisons now using `juce::exactlyEqual`.
+
+**Data race — fixed.** `TruePeakMeter::peak` was a plain `double`, written on
+the audio thread by `process()` and read on the message thread by the
+processor's timer and by `commit()`. Now `std::atomic<double>`, relaxed, the
+same way `LoudnessMeter::shortTermMaxPower` already was. Aligned doubles happen
+to be atomic on arm64, so this would likely never have misbehaved in
+practice — but it was formally undefined and free to fix.
+
+**Behaviour bug — fixed.** Moving Target or Ceiling while in HOLD did nothing.
+The measurement is frozen once committed, so the trim was never recomputed and
+the Target slider silently stopped working the moment it mattered. The timer
+now recomputes from the frozen measurement whenever those settings move. The
+committed true peak is persisted too, so a reloaded project can still honour
+the ceiling.
+
+**UI gap — fixed.** In short-term-max mode with under 3 s of audio the panel
+said "Ready" and then `Hold now` did nothing, because the mode had no reading
+to commit. The status line now says so.
+
+**Memory.** The block ring defaulted to an hour of capacity: 576 kB per
+instance, ~15 MB across a 27-track session. `learnSeconds` maxes at 120, so
+600 s is still 5x headroom — now 94 kB per instance, 2.5 MB per session.
+
+**Realtime safety** re-verified: no allocation, locks, or I/O in `processBlock`.
+Meter resets run on the audio thread by design (clearing buffers the audio
+thread is reading would race); it is a one-off memset, now ~94 kB.
+
+**Meter accuracy, independently confirmed.** 39 real session files piped through
+`gs_analyze` and compared against **ffmpeg's `ebur128`**: mean absolute error
+**0.023 LU**, worst **0.050 LU** — inside ffmpeg's own printed precision.
+
+**Test suites now:**
+
+| suite | what it covers | count |
+|---|---|---|
+| `core/tests/test_loudness.cpp` | DSP: coefficients, calibration, gating, rate invariance, trim maths | 64 |
+| `plugin/tools/plugin_tests.cpp` | processor: gain reaching the audio, bypass null, state round-trip, presets, commit state machine | 21 |
+
+`plugin_tests` is what caught the HOLD-editing bug; no amount of DSP testing
+would have. Run both plus `auval` after any change:
+
+```
+cmake --build build --target test_loudness plugin_tests GainStager_AU
+./build/core/test_loudness && ./build/plugin/plugin_tests_artefacts/RelWithDebInfo/plugin_tests
+auval -v aufx Gnst Mkdd
+```
+
 ---
 
 ## 7. Explicitly out of scope

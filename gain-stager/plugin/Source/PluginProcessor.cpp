@@ -247,8 +247,8 @@ void GainStagerAudioProcessor::requestReset()
 
     // Reset means start over, so the trim goes too. Leaving it behind showed a
     // stale figure next to cleared readouts during Phase 4.
-    setParameter (trimParam, 0.0f);
-    setParameter (holdParam, 0.0f);
+    setParamValue (trimParam, 0.0f);
+    setParamValue (holdParam, 0.0f);
     wasHeld = false;
 }
 
@@ -276,8 +276,12 @@ void GainStagerAudioProcessor::commit()
     ceilingLimited.store (result.ceilingLimited);
     cachedMeasured.store (measured);
 
-    setParameter (trimParam, (float) result.trimDb);
-    setParameter (holdParam, 1.0f);
+    committedTarget = targetParam->get();
+    committedCeiling = ceilingParam->get();
+    committedCeilingEnabled = ceilingEnabledParam->get();
+
+    setParamValue (trimParam, (float) result.trimDb);
+    setParamValue (holdParam, 1.0f);
     wasHeld = true;
 }
 
@@ -297,9 +301,9 @@ void GainStagerAudioProcessor::setCurrentProgram (int index)
     currentProgram = index;
     const auto& preset = gs::presets()[index];
 
-    setParameter (targetParam, preset.targetLufs);
-    setParameter (ceilingParam, preset.ceilingDbTp);
-    setParameter (learnSecondsParam, preset.learnSeconds);
+    setParamValue (targetParam, preset.targetLufs);
+    setParamValue (ceilingParam, preset.ceilingDbTp);
+    setParamValue (learnSecondsParam, preset.learnSeconds);
 
     if (modeParam != nullptr)
         modeParam->setValueNotifyingHost (
@@ -311,7 +315,29 @@ void GainStagerAudioProcessor::setCurrentProgram (int index)
     requestReset();
 }
 
-void GainStagerAudioProcessor::setParameter (juce::RangedAudioParameter* param, float value)
+void GainStagerAudioProcessor::recomputeTrimFromCommitted()
+{
+    const auto measured = cachedMeasured.load();
+
+    if (! gs::isValidMeasurement (measured))
+        return;
+
+    const auto result = gs::computeTrim (measured,
+                                         (double) targetParam->get(),
+                                         cachedTruePeakDb.load(),
+                                         (double) ceilingParam->get(),
+                                         ceilingEnabledParam->get(),
+                                         maxTrimDb);
+
+    ceilingLimited.store (result.ceilingLimited);
+    committedTarget = targetParam->get();
+    committedCeiling = ceilingParam->get();
+    committedCeilingEnabled = ceilingEnabledParam->get();
+
+    setParamValue (trimParam, (float) result.trimDb);
+}
+
+void GainStagerAudioProcessor::setParamValue (juce::RangedAudioParameter* param, float value)
 {
     param->setValueNotifyingHost (param->convertTo0to1 (value));
 }
@@ -333,6 +359,17 @@ void GainStagerAudioProcessor::timerCallback()
     // the cleared readouts were overwritten 100 ms later by stale values.
     if (resetPending.load())
         return;
+
+    if (held)
+    {
+        const bool settingsMoved =
+            ! juce::exactlyEqual (targetParam->get(), committedTarget)
+            || ! juce::exactlyEqual (ceilingParam->get(), committedCeiling)
+            || ceilingEnabledParam->get() != committedCeilingEnabled;
+
+        if (settingsMoved)
+            recomputeTrimFromCommitted();
+    }
 
     if (! held)
     {
@@ -371,6 +408,7 @@ void GainStagerAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
     state.setProperty ("measured", cachedMeasured.load(), nullptr);
     state.setProperty ("ceilingLimited", ceilingLimited.load(), nullptr);
     state.setProperty ("program", currentProgram, nullptr);
+    state.setProperty ("truePeak", cachedTruePeakDb.load(), nullptr);
 
     if (auto xml = std::unique_ptr<juce::XmlElement> (state.createXml()))
         copyXmlToBinary (*xml, destData);
@@ -390,6 +428,11 @@ void GainStagerAudioProcessor::setStateInformation (const void* data, int sizeIn
     ceilingLimited.store ((bool) tree.getProperty ("ceilingLimited", false));
     currentProgram = juce::jlimit (0, gs::presetCount() - 1,
                                    (int) tree.getProperty ("program", 0));
+    cachedTruePeakDb.store ((double) tree.getProperty ("truePeak", gs::TruePeakMeter::floorDb));
+
+    committedTarget = targetParam->get();
+    committedCeiling = ceilingParam->get();
+    committedCeilingEnabled = ceilingEnabledParam->get();
 
     // Reopening a project must never change the mix. If a trim was committed,
     // come back in Hold with that exact trim and do not re-arm. Syncing wasHeld

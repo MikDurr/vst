@@ -57,6 +57,17 @@ target_compile_definitions(ui_snapshot PRIVATE
     JUCE_MODAL_LOOPS_PERMITTED=1
 )
 
+juce_add_console_app(plugin_tests PRODUCT_NAME "plugin_tests")
+target_sources(plugin_tests PRIVATE tools/plugin_tests.cpp)
+target_link_libraries(plugin_tests PRIVATE
+    GainStager gs_core
+    juce::juce_audio_utils juce::juce_audio_processors juce::juce_dsp juce::juce_gui_basics
+    juce::juce_recommended_config_flags)
+target_compile_definitions(plugin_tests PRIVATE
+    JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
+    JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=1)
+add_test(NAME plugin COMMAND plugin_tests)
+
 # Logic will not load an unsigned component. JUCE's COPY_PLUGIN_AFTER_BUILD step
 # is itself a POST_BUILD command registered earlier, so by the time this runs the
 # bundle is already installed and both copies need the ad-hoc signature.

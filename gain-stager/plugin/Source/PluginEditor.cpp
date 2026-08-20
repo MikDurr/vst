@@ -122,7 +122,7 @@ void GainStagerLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Butto
 }
 
 void GainStagerLookAndFeel::drawTickBox (juce::Graphics& g, juce::Component&,
-                                         float x, float y, float w, float h,
+                                         float x, float y, float, float h,
                                          bool ticked, bool, bool shouldDrawButtonAsHighlighted, bool)
 {
     const juce::Rectangle<float> box (x, y + (h - 15.0f) * 0.5f, 15.0f, 15.0f);
@@ -272,6 +272,13 @@ juce::String GainStagerAudioProcessorEditor::statusLine() const
         return "Needs " + juce::String (minimum - gatedSeconds, 1)
              + " s more audio before it can commit.";
 
+    // Enough audio has arrived, but the active mode may still have nothing to
+    // report -- short-term max needs a full 3 s window. Without this the panel
+    // said "Ready" and then Hold now did nothing at all.
+    if (measured <= -150.0)
+        return "Enough audio, but no reading in this mode yet "
+               "(short-term max needs 3 s unbroken).";
+
     return "Ready. Commits when the transport stops, or at "
          + juce::String (learnSeconds, 0) + " s.";
 }
@@ -389,7 +396,7 @@ void GainStagerAudioProcessorEditor::paintStatus (juce::Graphics& g, juce::Recta
         g.drawText (juce::String (gatedSeconds, 1) + " s of audio", amount,
                     juce::Justification::centredRight);
 
-        const juce::Rectangle<float> track ((float) barRow.getX(), barRow.getCentreY() - 3.0f,
+        const juce::Rectangle<float> track ((float) barRow.getX(), (float) barRow.getCentreY() - 3.0f,
                                             (float) barRow.getWidth() - 12.0f, 6.0f);
         g.setColour (theme::background);
         g.fillRoundedRectangle (track, 3.0f);
@@ -527,12 +534,12 @@ void GainStagerAudioProcessorEditor::timerCallback()
     }
 
     const bool changed = newState != state
-                      || newMeasured != measured
-                      || newTrim != trimDb
-                      || newGated != gatedSeconds
-                      || newPeak != truePeakDb
-                      || newLearn != learnSeconds
-                      || newCeiling != ceilingDb
+                      || ! juce::exactlyEqual (newMeasured, measured)
+                      || ! juce::exactlyEqual (newTrim, trimDb)
+                      || ! juce::exactlyEqual (newGated, gatedSeconds)
+                      || ! juce::exactlyEqual (newPeak, truePeakDb)
+                      || ! juce::exactlyEqual (newLearn, learnSeconds)
+                      || ! juce::exactlyEqual (newCeiling, ceilingDb)
                       || newLimited != ceilingLimited
                       || newReset != resetPending
                       || newUnit != unit;

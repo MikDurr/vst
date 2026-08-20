@@ -109,7 +109,7 @@ private:
     /** Computes and stores the trim, then latches Hold. Message thread. */
     void commit();
 
-    void setParameter (juce::RangedAudioParameter* param, float value);
+    void setParamValue (juce::RangedAudioParameter* param, float value);
 
     //==========================================================================
     gs::LoudnessMeter meter;
@@ -146,6 +146,15 @@ private:
 
     bool wasHeld = false;
     int currentProgram = 0;
+
+    // Settings in force at the last commit. While held the measurement is
+    // frozen, so if any of these move the trim must be recomputed from it --
+    // otherwise the Target slider silently does nothing once committed.
+    float committedTarget = 0.0f;
+    float committedCeiling = 0.0f;
+    bool committedCeilingEnabled = true;
+
+    void recomputeTrimFromCommitted();
 
     std::atomic<double> preparedSampleRate { 0.0 };
     std::atomic<int>    preparedBlockSize  { 0 };

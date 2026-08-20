@@ -75,8 +75,11 @@ public:
     /** Hops in the short-term window: 30 x 100 ms = 3 s, per EBU Tech 3341. */
     static constexpr int shortTermHops = 30;
 
-    /** @param maxSeconds  capacity of the block ring; older blocks are dropped. */
-    void prepare (double sampleRate, int numChannels, double maxSeconds = 3600.0);
+    /** @param maxSeconds  capacity of the block ring; older blocks are dropped.
+                            600 s is 5x the maximum `learnSeconds` of 120, and
+                            costs ~96 kB per instance rather than the ~576 kB an
+                            hour-long ring needed -- which mattered at 27 tracks. */
+    void prepare (double sampleRate, int numChannels, double maxSeconds = 600.0);
     void reset() noexcept;
 
     /** Realtime-safe. `channels` is an array of `numChannels` pointers. */

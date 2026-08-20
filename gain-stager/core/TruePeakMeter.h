@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <vector>
 
 namespace gs
@@ -36,7 +37,7 @@ public:
     void process (const float* const* channels, int numSamples) noexcept;
 
     /** Highest interpolated absolute sample seen since the last reset. */
-    double truePeak() const noexcept { return peak; }
+    double truePeak() const noexcept { return peak.load (std::memory_order_relaxed); }
     double truePeakDb() const noexcept;
 
 private:
@@ -51,7 +52,10 @@ private:
     std::vector<double> history;
     int writePos = 0;
 
-    double peak = 0.0;
+    // Written on the audio thread, read from the message thread by the
+    // processor's timer and by commit(). Relaxed is enough: it is a single
+    // scalar with no ordering relationship to anything else.
+    std::atomic<double> peak { 0.0 };
 };
 
 } // namespace gs

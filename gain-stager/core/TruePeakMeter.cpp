@@ -87,7 +87,7 @@ void TruePeakMeter::reset() noexcept
 {
     std::fill (history.begin(), history.end(), 0.0);
     writePos = 0;
-    peak = 0.0;
+    peak.store (0.0, std::memory_order_relaxed);
 }
 
 void TruePeakMeter::process (const float* const* channels, int numSamples) noexcept
@@ -121,7 +121,10 @@ void TruePeakMeter::process (const float* const* channels, int numSamples) noexc
                     acc += coeffs[k] * line[index];
                 }
 
-                peak = std::max (peak, std::abs (acc));
+                const auto magnitude = std::abs (acc);
+
+                if (magnitude > peak.load (std::memory_order_relaxed))
+                    peak.store (magnitude, std::memory_order_relaxed);
             }
         }
     }
@@ -129,10 +132,12 @@ void TruePeakMeter::process (const float* const* channels, int numSamples) noexc
 
 double TruePeakMeter::truePeakDb() const noexcept
 {
-    if (! (peak > 0.0))
+    const auto value = peak.load (std::memory_order_relaxed);
+
+    if (! (value > 0.0))
         return floorDb;
 
-    return std::max (floorDb, 20.0 * std::log10 (peak));
+    return std::max (floorDb, 20.0 * std::log10 (value));
 }
 
 } // namespace gs
