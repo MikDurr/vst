@@ -50,9 +50,16 @@ GainStagerAudioProcessor::createParameterLayout()
         ParameterID { "learnSeconds", 1 }, "Learn time",
         NormalisableRange<float> (2.0f, 120.0f, 1.0f), 10.0f));
 
+    // A ceiling exists to stop the trim CREATING a clipping problem, not to
+    // normalise peaks. Together with the target it caps the crest factor it
+    // will tolerate (ceiling - target), and the old -6 default allowed only
+    // 12 dB - less than a raw vocal (~15) or drums (~20), so on real material
+    // it silently pulled tracks below target and blamed the ceiling. At -1 it
+    // tolerates 17 dB against the -18 target and only engages when a trim
+    // genuinely heads for clipping.
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { "ceiling", 1 }, "Ceiling",
-        NormalisableRange<float> (-12.0f, 0.0f, 0.1f), -6.0f));
+        NormalisableRange<float> (-12.0f, 0.0f, 0.1f), -1.0f));
 
     layout.add (std::make_unique<AudioParameterBool> (
         ParameterID { "ceilingEnabled", 1 }, "Ceiling on", true));
@@ -274,6 +281,36 @@ void GainStagerAudioProcessor::commit()
     wasHeld = true;
 }
 
+const juce::String GainStagerAudioProcessor::getProgramName (int index)
+{
+    if (juce::isPositiveAndBelow (index, gs::presetCount()))
+        return gs::presets()[index].name;
+
+    return {};
+}
+
+void GainStagerAudioProcessor::setCurrentProgram (int index)
+{
+    if (! juce::isPositiveAndBelow (index, gs::presetCount()))
+        return;
+
+    currentProgram = index;
+    const auto& preset = gs::presets()[index];
+
+    setParameter (targetParam, preset.targetLufs);
+    setParameter (ceilingParam, preset.ceilingDbTp);
+    setParameter (learnSecondsParam, preset.learnSeconds);
+
+    if (modeParam != nullptr)
+        modeParam->setValueNotifyingHost (
+            modeParam->convertTo0to1 ((float) preset.mode));
+
+    // A preset changes what "correct" means, so anything already learned under
+    // the old settings is stale. Re-arm rather than leaving a trim on screen
+    // that the new preset would not have produced.
+    requestReset();
+}
+
 void GainStagerAudioProcessor::setParameter (juce::RangedAudioParameter* param, float value)
 {
     param->setValueNotifyingHost (param->convertTo0to1 (value));
@@ -333,6 +370,7 @@ void GainStagerAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
     auto state = apvts.copyState();
     state.setProperty ("measured", cachedMeasured.load(), nullptr);
     state.setProperty ("ceilingLimited", ceilingLimited.load(), nullptr);
+    state.setProperty ("program", currentProgram, nullptr);
 
     if (auto xml = std::unique_ptr<juce::XmlElement> (state.createXml()))
         copyXmlToBinary (*xml, destData);
@@ -350,6 +388,8 @@ void GainStagerAudioProcessor::setStateInformation (const void* data, int sizeIn
 
     cachedMeasured.store ((double) tree.getProperty ("measured", gs::LoudnessMeter::silence));
     ceilingLimited.store ((bool) tree.getProperty ("ceilingLimited", false));
+    currentProgram = juce::jlimit (0, gs::presetCount() - 1,
+                                   (int) tree.getProperty ("program", 0));
 
     // Reopening a project must never change the mix. If a trim was committed,
     // come back in Hold with that exact trim and do not re-arm. Syncing wasHeld

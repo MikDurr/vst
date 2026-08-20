@@ -157,18 +157,27 @@ trim. Commit fires on whichever comes first:
   per the Phase 0 finding in §0, Logic stops calling `processBlock` entirely on
   a silent track, so "stopped" and "silent" are indistinguishable from the
   audio thread.
-- **20 s of gated-in audio** accumulated (not 20 s of wall clock — silence must
-  not count, or a sparse vocal commits on almost no data)
+- **`learnSeconds` of gated-in audio** accumulated (not wall clock — silence
+  must not count, or a sparse vocal commits on almost no data). Default 10 s;
+  presets lower it for sparse sources, which gate at ~53%.
 - user presses Hold
 
 ### Computing the trim
 
 ```
-trim = clamp(target − measured, ±24 dB)
+targetTrim = clamp(target − measured, ±24 dB)
 
-if ceilingEnabled and (measuredTruePeak + trim) > ceiling:
-    trim = ceiling − measuredTruePeak        # back off
-    flag "ceiling-limited" in the UI          # never silently
+# The ceiling may stop the trim making peaks WORSE. It may never force them
+# below where they started: a source already above the ceiling is not the
+# trim's doing, and turning a track down cannot clip.
+reachable   = max(ceiling, measuredTruePeak)
+ceilingTrim = reachable − measuredTruePeak      # never negative
+
+if targetTrim > ceilingTrim:
+    trim = ceilingTrim
+    flag "ceiling-limited" in the UI            # never silently
+else:
+    trim = targetTrim
 ```
 
 Applied through a ~50 ms `SmoothedValue` ramp so committing mid-playback
@@ -366,6 +375,56 @@ Two behaviours pinned by those tests, both intentional:
 Phase 1 is the one with real content. Do not start Phase 2 until the reference
 tests pass — a meter that is quietly 2 dB off produces a tool that is worse
 than doing it by hand.
+
+### Phase 5 result: calibrated against real material, and presets
+
+The question was whether the plugin could be "trained" on real vocals to make
+it more accurate. It cannot, and does not need to be: BS.1770 is an exact
+algorithm, not a learned model. What real material *can* do is validate it and
+calibrate the defaults.
+
+**Independent validation.** `core/tools/gs_analyze.cpp` is the CLI over `core/`
+that §7 always said was possible. Piping real session files through it and
+comparing against **ffmpeg's `ebur128`** — a completely separate implementation
+— gives **0.03 LU mean absolute error, 0.05 LU worst case** over 11 files,
+which is inside ffmpeg's own printed precision. The meter is correct.
+
+**Calibration.** 200 files from the user's own sessions, grouped by instrument:
+
+| class | median LUFS | median crest | p90 crest | gated |
+|---|---|---|---|---|
+| vocals | -26.8 | 12.6 | **21.0** | 53% |
+| drums | -15.5 | 13.9 | 20.5 | 85% |
+| bass | -10.5 | 9.8 | 11.9 | 96% |
+| guitar | -13.8 | 12.1 | 14.4 | 93% |
+| keys | -18.8 | 13.7 | 16.7 | 95% |
+| synth | -18.9 | 12.7 | 16.4 | 95% |
+| brass/strings | -15.2 | 12.4 | 14.6 | 85% |
+| fx | -17.9 | 14.6 | 34.3 | 93% |
+
+This drove three changes:
+
+1. **Ceiling default -6 -> -1 dBTP.** Ceiling minus target caps the crest
+   factor the plugin tolerates. At -6 against a -18 target that was 12 dB —
+   below the median crest of every class measured except bass.
+
+2. **The ceiling rule itself was wrong**, which the -6 default merely exposed.
+   It compared `peak + trim` against the ceiling in absolute terms, so a source
+   that already sat above the ceiling was dragged *down* even when the trim was
+   negative — and turning a track down cannot clip. The rule is now: the
+   ceiling may stop the trim making peaks worse, never force them below where
+   they started. A real case (V4: -17.93 LUFS, -3.11 dBTP, already on target)
+   was being pushed 2.8 dB under target and told the ceiling did it. That case
+   is now a permanent regression test.
+
+3. **Twelve factory presets** in `core/Presets.h`, exposed as AU programs so
+   Logic lists them in its own header menu. Values come from the table above,
+   not from taste. `learnSeconds` counts gated audio, so sparse sources get
+   smaller numbers to commit in comparable wall-clock time; transient material
+   uses short-term max or true peak, where integrated loudness under-reads
+   bursts. Where classes measured the same they share values — guitar, keys and
+   synth sit within 1.5 dB of each other on both crest and gating, so inventing
+   a difference would be dishonest.
 
 ---
 

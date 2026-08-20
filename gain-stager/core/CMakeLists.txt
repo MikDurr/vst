@@ -13,3 +13,6 @@ add_executable(test_loudness tests/test_loudness.cpp)
 target_link_libraries(test_loudness PRIVATE gs_core)
 
 add_test(NAME loudness COMMAND test_loudness)
+
+add_executable(gs_analyze tools/gs_analyze.cpp)
+target_link_libraries(gs_analyze PRIVATE gs_core)

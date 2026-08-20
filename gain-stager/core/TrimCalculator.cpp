@@ -22,15 +22,23 @@ TrimResult computeTrim (double measured,
     if (! isValidMeasurement (measured))
         return result;
 
-    result.trimDb = std::clamp (target - measured, -maxTrimDb, maxTrimDb);
+    const double targetTrim = std::clamp (target - measured, -maxTrimDb, maxTrimDb);
+    result.trimDb = targetTrim;
 
-    // Applying the trim must not push peaks past the ceiling. Back off to
-    // whatever lands exactly on it, and say so — under-trimming silently would
-    // leave the track quieter than the readout claims.
-    if (ceilingEnabled && isValidMeasurement (truePeakDb)
-        && truePeakDb + result.trimDb > ceilingDb)
+    if (! (ceilingEnabled && isValidMeasurement (truePeakDb)))
+        return result;
+
+    // The ceiling exists to stop the trim CREATING a peak problem, never to
+    // normalise peaks that were already there. If the source already sits above
+    // the ceiling, the most the ceiling may ask for is "do not make it worse" —
+    // it must not drag a track down that the target was happy with, and turning
+    // a track DOWN can never cause clipping, so a negative trim is always free.
+    const double reachable = std::max (ceilingDb, truePeakDb);
+    const double ceilingTrim = reachable - truePeakDb;   // never negative
+
+    if (targetTrim > ceilingTrim)
     {
-        result.trimDb = std::clamp (ceilingDb - truePeakDb, -maxTrimDb, maxTrimDb);
+        result.trimDb = std::clamp (ceilingTrim, -maxTrimDb, maxTrimDb);
         result.ceilingLimited = true;
     }
 

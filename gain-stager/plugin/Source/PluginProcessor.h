@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "LoudnessMeter.h"
+#include "Presets.h"
 #include "TrimCalculator.h"
 #include "TruePeakMeter.h"
 
@@ -50,10 +51,12 @@ public:
     double getTailLengthSeconds() const override { return 0.0; }
     juce::AudioProcessorParameter* getBypassParameter() const override { return bypassParam; }
 
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram (int) override {}
-    const juce::String getProgramName (int) override { return {}; }
+    // Factory presets, exposed as AU programs so Logic lists them in its own
+    // plugin header menu as well as in our editor.
+    int getNumPrograms() override { return gs::presetCount(); }
+    int getCurrentProgram() override { return currentProgram; }
+    void setCurrentProgram (int index) override;
+    const juce::String getProgramName (int index) override;
     void changeProgramName (int, const juce::String&) override {}
 
     void getStateInformation (juce::MemoryBlock& destData) override;
@@ -142,6 +145,7 @@ private:
     std::atomic<bool> ceilingLimited { false };
 
     bool wasHeld = false;
+    int currentProgram = 0;
 
     std::atomic<double> preparedSampleRate { 0.0 };
     std::atomic<int>    preparedBlockSize  { 0 };

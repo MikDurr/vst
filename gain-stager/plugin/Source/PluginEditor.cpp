@@ -186,6 +186,19 @@ GainStagerAudioProcessorEditor::GainStagerAudioProcessorEditor (GainStagerAudioP
         modeAttachment = std::make_unique<ComboAttachment> (processorRef.apvts, "mode", modeBox);
     }
 
+    for (int i = 0; i < gs::presetCount(); ++i)
+        presetBox.addItem (gs::presets()[i].name, i + 1);
+
+    presetBox.setSelectedId (processorRef.getCurrentProgram() + 1, juce::dontSendNotification);
+    presetBox.onChange = [this]
+    {
+        const auto index = presetBox.getSelectedId() - 1;
+
+        if (index >= 0 && index != processorRef.getCurrentProgram())
+            processorRef.setCurrentProgram (index);
+    };
+    addAndMakeVisible (presetBox);
+
     addAndMakeVisible (ceilingToggle);
     ceilingToggleAttachment = std::make_unique<ButtonAttachment> (processorRef.apvts, "ceilingEnabled", ceilingToggle);
 
@@ -205,13 +218,14 @@ GainStagerAudioProcessorEditor::GainStagerAudioProcessorEditor (GainStagerAudioP
         addAndMakeVisible (label);
     };
 
+    setupLabel (presetLabel,  "Preset");
     setupLabel (targetLabel,  "Target");
     setupLabel (trimLabel,    "Trim");
     setupLabel (modeLabel,    "Mode");
     setupLabel (ceilingLabel, "Ceiling");
     setupLabel (learnLabel,   "Learn");
 
-    setSize (470, 464);
+    setSize (470, 502);
     startTimerHz (15);
 }
 
@@ -438,6 +452,13 @@ void GainStagerAudioProcessorEditor::resized()
     headerArea = area.removeFromTop (26);
     area.removeFromTop (12);
 
+    {
+        auto r = area.removeFromTop (26);
+        presetLabel.setBounds (r.removeFromLeft (62));
+        presetBox.setBounds (r.reduced (0, 1));
+        area.removeFromTop (12);
+    }
+
     readoutArea = area.removeFromTop (104);
     area.removeFromTop (10);
 
@@ -497,6 +518,13 @@ void GainStagerAudioProcessorEditor::timerCallback()
     const auto newLimited = processorRef.isCeilingLimited();
     const auto newReset = processorRef.isResetPending();
     const auto newUnit = processorRef.getMeasurementUnit();
+
+    // The host can change program from its own preset menu, so follow it.
+    if (const auto program = processorRef.getCurrentProgram(); program != shownProgram)
+    {
+        shownProgram = program;
+        presetBox.setSelectedId (program + 1, juce::dontSendNotification);
+    }
 
     const bool changed = newState != state
                       || newMeasured != measured

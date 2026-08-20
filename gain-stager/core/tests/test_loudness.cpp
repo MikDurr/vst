@@ -424,16 +424,42 @@ void testTrimCalculation()
         checkClose (tiny.trimDb, -24.0, 1e-12, "a -38 dB ask clamps to -24 dB");
     }
 
-    // Ceiling. Target wants +12, but the peak is already at -3 dBTP, so the
-    // most that fits under a -6 dBTP ceiling is -3 dB.
+    // Ceiling. It exists to stop the trim CREATING a peak problem, never to
+    // normalise peaks that were already there.
     {
-        const auto limited = gs::computeTrim (-30.0, -18.0, -3.0, -6.0, true);
-        checkClose (limited.trimDb, -3.0, 1e-12, "ceiling backs the trim off to land exactly on it");
+        // Source peaks at -5.8, under the -1 ceiling. The target wants +8.8,
+        // which would land at +3.0 dBTP, so it is held to +4.8.
+        const auto limited = gs::computeTrim (-26.8, -18.0, -5.8, -1.0, true);
+        checkClose (limited.trimDb, 4.8, 1e-9, "a boost that would clip is held at the ceiling");
         check (limited.ceilingLimited, "ceiling limiting is reported");
 
-        const auto ignored = gs::computeTrim (-30.0, -18.0, -3.0, -6.0, false);
-        checkClose (ignored.trimDb, 12.0, 1e-12, "ceiling disabled leaves the trim alone");
+        const auto ignored = gs::computeTrim (-26.8, -18.0, -5.8, -1.0, false);
+        checkClose (ignored.trimDb, 8.8, 1e-9, "ceiling disabled leaves the trim alone");
         check (! ignored.ceilingLimited, "ceiling disabled is never flagged");
+
+        // Source already ABOVE the ceiling. The ceiling may say "do not make it
+        // worse", so no boost -- but it must not drag the track down either.
+        const auto alreadyHot = gs::computeTrim (-30.0, -18.0, -3.0, -6.0, true);
+        checkClose (alreadyHot.trimDb, 0.0, 1e-9, "a source already past the ceiling gets no boost");
+        check (alreadyHot.ceilingLimited, "and that is reported");
+
+        // Turning DOWN can never cause clipping, so a negative trim is always
+        // free even when the source sits above the ceiling.
+        const auto turnDown = gs::computeTrim (-10.0, -18.0, -0.5, -6.0, true);
+        checkClose (turnDown.trimDb, -8.0, 1e-9, "a negative trim is never held back by the ceiling");
+        check (! turnDown.ceilingLimited, "and is not flagged as limited");
+    }
+
+    // Regression, from a real track (V4) seen in Logic. Measured -17.93 LUFS
+    // against a -18 target, so the trim wanted was -0.07 dB -- essentially
+    // nothing, the track was already staged. The old rule compared
+    // peak + trim against the ceiling in absolute terms, saw -3.18 > -6.0, and
+    // forced -2.89 dB, dropping the track 2.8 dB BELOW target and blaming the
+    // ceiling for it. Turning a track down cannot clip; this must never happen.
+    {
+        const auto v4 = gs::computeTrim (-17.93, -18.0, -3.11, -6.0, true);
+        checkClose (v4.trimDb, -0.07, 1e-9, "V4: an already-staged track is left alone");
+        check (! v4.ceilingLimited, "V4: and is not falsely reported as ceiling-limited");
     }
 
     // Nothing measured yet must not produce a trim.

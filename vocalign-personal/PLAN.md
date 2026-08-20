@@ -1,12 +1,32 @@
-# Personal VocAlign — Implementation Plan
+# vocalign — decision history
 
-A personal-use vocal alignment tool for Logic Pro 12.3 on Apple Silicon.
-Two pages: **Match Timing** (align dub takes to a guide) and **Match Pitch**
-(apply the guide's pitch contour to the dub). Automatic, with strength controls
-— no per-note manual editing.
+> **This is the record of how the tool got built, not how to use it.**
+> For what it is and how to run it, see **[README.md](README.md)**.
+> For the visual system, see **[DESIGN.md](DESIGN.md)**.
+>
+> **Status: shipped, as a standalone app.** The plan below starts by aiming at
+> a Logic plugin and ends somewhere else entirely. That path is left intact
+> rather than tidied away, because the reasons it changed are the useful part:
+> two architectures were killed by cheap tests before either got expensive,
+> and the renderer was chosen by blind listening after the first
+> implementation sounded bad.
+>
+> **The short version of what happened:**
+> 1. **ARA plugin — killed by Phase 0.** Logic 12.3 on Apple Silicon never
+>    calls a third-party ARA factory. Half a day to find out. (§0)
+> 2. **From-scratch PSOLA — killed by ear.** Built as planned, sounded harsh
+>    on real vocals. Replaced with Praat's. (§3, Phase 1b)
+> 3. **Capture-mode AU plugin — killed by workflow.** An AU can't alter the
+>    audio *file*, and Melodyne/Flex Pitch edit regions, not plugin output.
+>    (§8)
+> 4. **Standalone app — shipped.** Which also lifted the embedding constraint,
+>    so the best-sounding renderer became usable. (§8, §4)
 
-Target: `mikaild` only. No distribution, no installer, no Windows, no VST3/AAX,
-no copy protection.
+A personal-use vocal alignment tool. **Match Timing** (align dub takes to a
+guide) and **Match Pitch** (apply the guide's pitch contour to the dub).
+Automatic, with strength controls — no per-note manual editing.
+
+Target: `mikaild` only. No distribution, no installer, no Windows.
 
 ---
 
@@ -648,8 +668,26 @@ Two files in, one file out, using the tuned `vpa align` pipeline directly.
 | 2.5 | R2 spike: AU process sharing | — | **Cancelled — moot under standalone (§8)** |
 | 2b | C++ engine port | — | **Cancelled — moot under standalone (§8)** |
 | 3 | Capture-mode AU plugin shell | — | **Cancelled — moot under standalone (§8)** |
-| **4** | **Alignment page in the existing FastAPI + SvelteKit app** | **moderate; iterative** | **Next** |
-| 5 | Polish | small | Not started |
+| 4 | Standalone app: FastAPI engine + SvelteKit UI | moderate; iterative | **Done** |
+| 5 | Polish | small | Ongoing |
+
+### Built after the plan closed
+
+- **Extracted to its own project.** The tool was first built inside
+  `vocal-pitch-analyzer`, which was wrong — that's a *practice* app and this
+  is a *production* one. Moved to `M_VSTs/vocalign-personal/` with its own
+  copy of the three DSP modules it needs, so it stands alone.
+- **UI rebuilt against the VocAlign reference.** The first version was a
+  generic light web form. Redone as a dark plugin window — stacked colour-coded
+  waveform lanes, right-hand control panel, rotary knobs. See DESIGN.md.
+- **44.1 kHz rendering.** The pipeline had inherited `DEFAULT_SR = 22050` from
+  the pitch-analysis code, so every render was half-bandwidth. Analysis stays
+  at 22.05 k (cheap, and pitch lives well below 11 kHz); rendering is now full
+  rate. Confirmed by ear.
+- **Stereo support.** Channel layout and width preserved; the same time and
+  pitch maps go to every channel so they stay locked.
+- **Multi-dub.** A whole stack (L + R doubles) goes through in one pass,
+  rendered sequentially against the same guide.
 
 The ordering matters more than the estimates: **cheap tests that can
 invalidate an expensive direction always come first.** Phase 0 de-risked the

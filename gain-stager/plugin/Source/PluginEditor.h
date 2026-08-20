@@ -112,7 +112,9 @@ private:
     bool resetPending = false;
     juce::String unit { "LUFS" };
 
-    juce::Label targetLabel, trimLabel, modeLabel, ceilingLabel, learnLabel;
+    juce::Label presetLabel, targetLabel, trimLabel, modeLabel, ceilingLabel, learnLabel;
+    juce::ComboBox presetBox;
+    int shownProgram = -1;
     juce::Slider targetSlider, trimSlider, ceilingSlider, learnSlider;
     juce::ComboBox modeBox;
     juce::ToggleButton ceilingToggle, autoLearnToggle { "Auto learn" };
