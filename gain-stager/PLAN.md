@@ -421,9 +421,27 @@ This drove three changes:
    was being pushed 2.8 dB under target and told the ceiling did it. That case
    is now a permanent regression test.
 
-3. **Twelve factory presets** in `core/Presets.h`, exposed as AU programs so
-   Logic lists them in its own header menu. Values come from the table above,
-   not from taste. `learnSeconds` counts gated audio, so sparse sources get
+3. **Factory presets** in `core/Presets.h`, exposed as AU programs so Logic
+   lists them in its own header menu. Values come from measurement, not taste.
+   Expanded to **21** after a second pass over the library discovered the
+   synth family was being lumped into one bucket: arps gate at 84% and pads at
+   97%, which is a real difference in how long each must play before it can
+   commit. Plucks, arps, chords/stabs, pads, lead synth, bells, percussion,
+   sub/808 and choir were measured separately and given their own entries.
+
+   Three rules turn the measurements into values: `learnSeconds` is set to
+   about `12 x gated-ratio`, so every preset takes a comparable ~12 s of
+   *playing* to commit; anything above ~14.5 dB median crest uses short-term
+   max, since integrated loudness under-reads bursts; and one-shots and fx are
+   staged by **peak** at -6 dBTP, because a gated loudness target on a 0.3 s
+   sample is meaningless and fx measured a p90 crest of 34.7 dB.
+
+   **Preset order is load-bearing.** The AU program index is a position in this
+   table and saved projects store that index, so reordering makes an old
+   project display the wrong preset name. Parameter values still restore
+   correctly from the APVTS state, so nothing sounds different -- but append
+   new presets rather than inserting them. Tests look presets up by name for
+   the same reason. `learnSeconds` counts gated audio, so sparse sources get
    smaller numbers to commit in comparable wall-clock time; transient material
    uses short-term max or true peak, where integrated loudness under-reads
    bursts. Where classes measured the same they share values — guitar, keys and

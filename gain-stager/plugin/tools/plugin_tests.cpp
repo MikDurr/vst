@@ -75,6 +75,18 @@ namespace
     };
 
     const double quietAmp = std::pow (10.0, -30.0 / 20.0);   // -30 LUFS stereo
+
+    /** Presets are looked up by name, never by index: the AU program index is
+        just a position in the table, and hardcoding it means every reorder
+        silently retargets a test at a different preset. */
+    int presetIndex (const juce::String& name)
+    {
+        for (int i = 0; i < gs::presetCount(); ++i)
+            if (name == gs::presets()[i].name)
+                return i;
+
+        return -1;
+    }
 }
 
 int main()
@@ -116,10 +128,13 @@ int main()
     {
         Rig a;
         a.set ("mode", 0.0f);
-        feed (a.p, 1000.0, quietAmp, 12.0);
+        feed (a.p, 1000.0, quietAmp, 20.0);
         pump (400);
-        a.p.setCurrentProgram (6);          // Guitar
-        feed (a.p, 1000.0, quietAmp, 12.0);
+        a.p.setCurrentProgram (presetIndex ("Guitar"));
+        // Comfortably past Guitar's 12 s of gated audio. Feeding exactly the
+        // learn time is marginal: a continuous tone yields slightly less gated
+        // audio than its duration, because the first block is incomplete.
+        feed (a.p, 1000.0, quietAmp, 20.0);
         pump (400);
 
         const auto trimBefore = a.get ("trim");
@@ -156,13 +171,21 @@ int main()
         }
         check (true, "every preset applies its target, ceiling and learn time");
 
+        bool namesUnique = true;
+        for (int i = 0; i < gs::presetCount(); ++i)
+        {
+            if (presetIndex (gs::presets()[i].name) != i)
+                namesUnique = false;
+        }
+        check (namesUnique, "preset names are unique and resolvable");
+
         // A preset changes what "correct" means, so it must re-arm.
-        r.p.setCurrentProgram (0);          // Default: 10 s learn
+        r.p.setCurrentProgram (presetIndex ("Default"));
         pump (200);
         feed (r.p, 1000.0, quietAmp, 12.0);
         pump (400);
         check (r.p.getState() == GainStagerAudioProcessor::State::Hold, "holds before switching preset");
-        r.p.setCurrentProgram (1);
+        r.p.setCurrentProgram (presetIndex ("Vocal"));
         pump (300);
         check (r.p.getState() != GainStagerAudioProcessor::State::Hold, "switching preset re-arms");
     }
@@ -182,7 +205,7 @@ int main()
     std::printf ("\nModes that cannot measure yet\n");
     {
         Rig r;
-        r.p.setCurrentProgram (3);            // Drums - bus, short-term max
+        r.p.setCurrentProgram (presetIndex ("Drums - bus or loop"));   // short-term max
         feed (r.p, 1000.0, quietAmp, 1.0);    // under the 3 s short-term window
         pump (300);
         r.p.commitNow();
@@ -195,7 +218,7 @@ int main()
     std::printf ("\nShort material\n");
     {
         Rig r;
-        r.p.setCurrentProgram (4);            // Drums - one-shot, true peak
+        r.p.setCurrentProgram (presetIndex ("Drums - one-shot"));      // true peak
         feed (r.p, 1000.0, quietAmp, 0.4);    // a single hit
         pump (400);
         check (r.p.getState() != GainStagerAudioProcessor::State::Hold,
