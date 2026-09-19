@@ -5,6 +5,7 @@
 	import Toggle from '$lib/components/Toggle.svelte';
 	import WaveLane from '$lib/components/WaveLane.svelte';
 	import { durationLabel, peaksFromBlob } from '$lib/peaks';
+	import { zipAndDownload, type ZipEntry } from '$lib/zip';
 
 	/** One dub take and everything derived from it. Kept as a list so a whole
 	 *  stack (L + R doubles, ad-libs…) goes through in one pass — they all
@@ -21,19 +22,68 @@
 		error: string | null;
 	}
 
-	let nextId = 0;
+	/** One guide track and the dubs aligned against it. A session per guide
+	 *  track — verse guide, chorus guide, a different singer's guide — kept
+	 *  as tabs, so switching between them doesn't mean re-loading anything. */
+	interface Session {
+		id: number;
+		seq: number;
+		guideFile: File | null;
+		guidePeaks: Float32Array | null;
+		guideLoading: boolean;
+		dubs: Dub[];
+		durationS: number;
+	}
 
-	let guideFile = $state<File | null>(null);
-	let guidePeaks = $state<Float32Array | null>(null);
-	let guideLoading = $state(false);
-	let dubs = $state<Dub[]>([]);
-	let durationS = $state(0);
+	let nextId = 0;
+	let nextSessionSeq = 1;
+
+	function makeSession(): Session {
+		return {
+			id: nextId++,
+			seq: nextSessionSeq++,
+			guideFile: null,
+			guidePeaks: null,
+			guideLoading: false,
+			dubs: [],
+			durationS: 0
+		};
+	}
+
+	const initialSession = makeSession();
+	let sessions = $state<Session[]>([initialSession]);
+	let activeSessionId = $state(initialSession.id);
+	const active = $derived(sessions.find((s) => s.id === activeSessionId)!);
+
+	const sessionLabel = (s: Session) =>
+		s.guideFile ? s.guideFile.name.replace(/\.[^.]+$/, '') : `Guide ${s.seq}`;
+	const sessionDone = (s: Session) => s.dubs.filter((d) => d.result);
+
+	function addSession() {
+		const s = makeSession();
+		sessions.push(s);
+		activeSessionId = s.id;
+	}
+
+	function closeSession(id: number) {
+		if (sessions.length <= 1) return; // always keep at least one tab
+		const idx = sessions.findIndex((s) => s.id === id);
+		if (idx === -1) return;
+		for (const d of sessions[idx].dubs) if (d.outUrl) URL.revokeObjectURL(d.outUrl);
+		sessions = sessions.filter((s) => s.id !== id);
+		if (activeSessionId === id) {
+			activeSessionId = (sessions[idx] ?? sessions[idx - 1] ?? sessions[0]).id;
+		}
+	}
+
+	// Also doubles as each knob's double-click reset target.
+	const DEFAULTS = { tightness: 0.85, maxShiftS: 0.4, pitchStrength: 0.5 };
 
 	let matchTiming = $state(true);
-	let tightness = $state(0.85);
-	let maxShiftS = $state(0.4);
+	let tightness = $state(DEFAULTS.tightness);
+	let maxShiftS = $state(DEFAULTS.maxShiftS);
 	let matchPitch = $state(true);
-	let pitchStrength = $state(0.5);
+	let pitchStrength = $state(DEFAULTS.pitchStrength);
 	let nearestOctave = $state(true);
 	let renderer = $state<Renderer>('praat');
 
@@ -41,8 +91,9 @@
 	let error = $state<string | null>(null);
 	let engineOnline = $state<boolean | null>(null);
 
-	const done = $derived(dubs.filter((d) => d.result));
-	const ready = $derived(!!guideFile && dubs.length > 0 && !running);
+	const done = $derived(sessionDone(active));
+	const ready = $derived(!!active.guideFile && active.dubs.length > 0 && !running);
+	const allDoneCount = $derived(sessions.reduce((n, s) => n + sessionDone(s).length, 0));
 
 	$effect(() => {
 		engineUp().then((v) => (engineOnline = v));
@@ -51,28 +102,30 @@
 	async function loadGuide(files: File[]) {
 		const f = files[0];
 		if (!f) return;
-		guideFile = f;
-		guideLoading = true;
+		const s = active;
+		s.guideFile = f;
+		s.guideLoading = true;
 		error = null;
 		try {
-			guidePeaks = await peaksFromBlob(f);
+			s.guidePeaks = await peaksFromBlob(f);
 			const ac = new AudioContext();
 			try {
-				durationS = (await ac.decodeAudioData(await f.arrayBuffer())).duration;
+				s.durationS = (await ac.decodeAudioData(await f.arrayBuffer())).duration;
 			} finally {
 				void ac.close();
 			}
 		} catch {
 			error = `Couldn't read ${f.name}. Is it a supported audio file?`;
-			guideFile = null;
-			guidePeaks = null;
+			s.guideFile = null;
+			s.guidePeaks = null;
 		} finally {
-			guideLoading = false;
+			s.guideLoading = false;
 		}
 	}
 
 	async function addDubs(files: File[]) {
 		error = null;
+		const s = active;
 		for (const f of files) {
 			const d: Dub = {
 				id: nextId++,
@@ -85,11 +138,11 @@
 				outUrl: null,
 				error: null
 			};
-			dubs.push(d);
+			s.dubs.push(d);
 			// Mutate through the array, NOT the `d` reference above: pushing
 			// into a $state array stores a reactive proxy, and writing to the
 			// original object bypasses it, so the lane never repaints.
-			const live = dubs[dubs.length - 1];
+			const live = s.dubs[s.dubs.length - 1];
 			try {
 				live.peaks = await peaksFromBlob(f);
 			} catch {
@@ -101,24 +154,29 @@
 	}
 
 	function removeDub(id: number) {
-		const d = dubs.find((x) => x.id === id);
+		const s = active;
+		const d = s.dubs.find((x) => x.id === id);
 		if (d?.outUrl) URL.revokeObjectURL(d.outUrl);
-		dubs = dubs.filter((x) => x.id !== id);
+		s.dubs = s.dubs.filter((x) => x.id !== id);
 	}
 
 	async function run() {
-		if (!guideFile || !dubs.length) return;
+		const s = active;
+		if (!s.guideFile || !s.dubs.length) return;
 		running = true;
 		error = null;
 		// Sequential, not parallel: each render is CPU-heavy and they all hit
-		// one Python process — firing them at once would just thrash it.
-		for (const d of dubs) {
+		// one Python process — firing them at once would just thrash it. This
+		// also covers switching tabs mid-run: `running` is shared across every
+		// session, so the Align button stays disabled everywhere until this
+		// session's queue finishes, and a second run can't start alongside it.
+		for (const d of s.dubs) {
 			d.running = true;
 			d.error = null;
 			try {
 				const res = await alignTakes({
-					guideFile,
-					guideName: guideFile.name,
+					guideFile: s.guideFile,
+					guideName: s.guideFile.name,
 					dubFile: d.file,
 					dubName: d.file.name,
 					tightness: matchTiming ? tightness : 0,
@@ -151,15 +209,22 @@
 		a.click();
 	}
 
-	async function downloadAll() {
-		// Staggered: browsers throttle a burst of downloads from one gesture.
-		for (const d of done) {
-			downloadOne(d);
-			await new Promise((r) => setTimeout(r, 350));
+	function downloadTabZip() {
+		const entries: ZipEntry[] = done.map((d) => ({ path: outName(d), blob: d.result!.blob }));
+		void zipAndDownload(entries, `${sessionLabel(active)}_aligned.zip`);
+	}
+
+	function exportAllTabs() {
+		const entries: ZipEntry[] = [];
+		for (const s of sessions) {
+			const label = sessionLabel(s);
+			for (const d of sessionDone(s)) entries.push({ path: `${label}/${outName(d)}`, blob: d.result!.blob });
 		}
+		void zipAndDownload(entries, 'vocalign_export.zip');
 	}
 
 	const ticks = $derived.by(() => {
+		const durationS = active.durationS;
 		if (!durationS) return [] as number[];
 		const step = [1, 2, 5, 10, 15, 30, 60].find((s) => s >= durationS / 8) ?? 60;
 		const out: number[] = [];
@@ -183,22 +248,54 @@
 
 	<main class="shell">
 		<section class="stage" aria-label="Takes">
+			<div class="tabbar" role="tablist" aria-label="Guide tracks">
+				{#each sessions as s (s.id)}
+					<div class="tab" class:active={s.id === activeSessionId}>
+						<button
+							type="button"
+							role="tab"
+							class="tab-select"
+							aria-selected={s.id === activeSessionId}
+							onclick={() => (activeSessionId = s.id)}
+						>
+							{sessionLabel(s)}
+							{#if sessionDone(s).length}<span class="tab-count">{sessionDone(s).length}</span>{/if}
+						</button>
+						{#if sessions.length > 1}
+							<button
+								type="button"
+								class="tab-x"
+								aria-label="Close {sessionLabel(s)}"
+								onclick={() => closeSession(s.id)}>✕</button
+							>
+						{/if}
+					</div>
+				{/each}
+				<button type="button" class="tab-add" onclick={addSession}>+ Guide track</button>
+
+				{#if allDoneCount > 0}
+					<button type="button" class="tab-export" onclick={exportAllTabs}>
+						Export all ({allDoneCount})
+					</button>
+				{/if}
+			</div>
+
 			<div class="ruler" aria-hidden="true">
 				{#each ticks as t (t)}
-					<span class="tick" style:left="{(t / durationS) * 100}%">{durationLabel(t)}</span>
+					<span class="tick" style:left="{(t / active.durationS) * 100}%">{durationLabel(t)}</span>
 				{/each}
 			</div>
 
 			<WaveLane
-				name={guideFile ? `Guide — ${guideFile.name}` : 'Guide'}
-				peaks={guidePeaks}
+				name={active.guideFile ? `Guide — ${active.guideFile.name}` : 'Guide'}
+				peaks={active.guidePeaks}
 				color="var(--guide)"
-				loading={guideLoading}
+				loading={active.guideLoading}
 				empty="Drop the take you're matching to, or click to browse"
 				onDropFile={loadGuide}
 			/>
 
-			{#each dubs as d (d.id)}
+			{#each active.dubs as d (d.id)}
 				<WaveLane
 					name="Dub — {d.file.name}"
 					peaks={d.peaks}
@@ -225,19 +322,23 @@
 			{/each}
 
 			<WaveLane
-				name={dubs.length ? 'Add another dub' : 'Dub'}
+				name={active.dubs.length ? 'Add another dub' : 'Dub'}
 				peaks={null}
 				color="var(--dub)"
-				empty={dubs.length
+				empty={active.dubs.length
 					? 'Drop more takes here'
 					: 'Drop the take(s) to be aligned — several at once is fine'}
-				height={dubs.length ? 62 : 116}
+				height={active.dubs.length ? 62 : 116}
 				multiple={true}
 				onDropFile={addDubs}
 			/>
 		</section>
 
 		<aside class="panel" aria-label="Controls">
+			<p class="hint knob-hint">
+				Drag to adjust · shift-drag to fine-tune · scroll to nudge · double-click to reset.
+			</p>
+
 			<div class="group">
 				<div class="group-head">
 					<span class="group-title">Match Timing</span>
@@ -251,6 +352,7 @@
 					maxLabel="Tight"
 					accent="var(--dub)"
 					disabled={!matchTiming}
+					resetValue={DEFAULTS.tightness}
 				/>
 				<Knob
 					label="Maximum shift"
@@ -263,6 +365,7 @@
 					maxLabel="Wide"
 					accent="var(--dub)"
 					disabled={!matchTiming}
+					resetValue={DEFAULTS.maxShiftS}
 				/>
 			</div>
 
@@ -279,6 +382,7 @@
 					maxLabel="Guide"
 					accent="var(--result)"
 					disabled={!matchPitch}
+					resetValue={DEFAULTS.pitchStrength}
 				/>
 				<Segmented
 					label="Target mode"
@@ -312,27 +416,27 @@
 					{#if running}
 						<span class="spin" aria-hidden="true"></span>Aligning…
 					{:else}
-						Align{dubs.length > 1 ? ` ${dubs.length} dubs` : ''}
+						Align{active.dubs.length > 1 ? ` ${active.dubs.length} dubs` : ''}
 					{/if}
 				</button>
-				{#if !guideFile}
+				{#if !active.guideFile}
 					<p class="hint">Load a guide take.</p>
-				{:else if !dubs.length}
+				{:else if !active.dubs.length}
 					<p class="hint">Add at least one dub.</p>
 				{/if}
 			</div>
 
 			{#if error}<p class="error" role="alert">{error}</p>{/if}
-			{#each dubs.filter((d) => d.error) as d (d.id)}
+			{#each active.dubs.filter((d) => d.error) as d (d.id)}
 				<p class="error" role="alert">{d.file.name}: {d.error}</p>
 			{/each}
 
 			{#if done.length}
 				<div class="result">
 					<div class="res-head">
-						<span class="group-title">Results</span>
+						<span class="group-title">Results — {sessionLabel(active)}</span>
 						{#if done.length > 1}
-							<button class="dl small" onclick={downloadAll}>Download all</button>
+							<button class="dl small" onclick={downloadTabZip}>Download tab (zip)</button>
 						{/if}
 					</div>
 
@@ -416,6 +520,103 @@
 		border: 1px solid var(--line-soft);
 		border-radius: var(--r-lg);
 		overflow: hidden;
+	}
+	.tabbar {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 8px 10px;
+		background: var(--surface-raised);
+		border-bottom: 1px solid var(--line-soft);
+		overflow-x: auto;
+	}
+	.tab {
+		display: flex;
+		align-items: center;
+		flex: none;
+		background: var(--surface-sunken);
+		border: 1px solid var(--line-soft);
+		border-radius: var(--r-sm);
+		transition: border-color var(--fast) var(--ease);
+	}
+	.tab.active {
+		border-color: var(--accent);
+	}
+	.tab-select {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		border: 0;
+		background: transparent;
+		color: var(--ink-muted);
+		font-size: var(--t-micro);
+		font-weight: 600;
+		letter-spacing: 0.03em;
+		padding: 7px 6px 7px 10px;
+		white-space: nowrap;
+		max-width: 160px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.tab.active .tab-select {
+		color: var(--ink);
+	}
+	.tab-count {
+		font-family: var(--font-mono);
+		font-size: 0.5625rem;
+		color: var(--result);
+		background: oklch(0.7 0.16 289 / 0.18);
+		border-radius: 999px;
+		padding: 1px 5px;
+	}
+	.tab-x {
+		border: 0;
+		background: transparent;
+		color: var(--ink-faint);
+		font-size: 0.65rem;
+		line-height: 1;
+		padding: 7px 9px 7px 3px;
+		transition: color var(--fast) var(--ease);
+	}
+	.tab-x:hover {
+		color: var(--ink);
+	}
+	.tab-add {
+		flex: none;
+		border: 1px dashed var(--line);
+		background: transparent;
+		color: var(--ink-muted);
+		font-size: var(--t-micro);
+		font-weight: 600;
+		white-space: nowrap;
+		padding: 7px 10px;
+		border-radius: var(--r-sm);
+		transition:
+			color var(--fast) var(--ease),
+			border-color var(--fast) var(--ease);
+	}
+	.tab-add:hover {
+		color: var(--ink);
+		border-color: var(--ink-faint);
+	}
+	.tab-export {
+		margin-left: auto;
+		flex: none;
+		border: 1px solid var(--line);
+		background: var(--surface-sunken);
+		color: var(--result);
+		font-size: var(--t-micro);
+		font-weight: 600;
+		white-space: nowrap;
+		padding: 7px 10px;
+		border-radius: var(--r-sm);
+		transition:
+			background var(--fast) var(--ease),
+			border-color var(--fast) var(--ease);
+	}
+	.tab-export:hover {
+		background: var(--surface-raised);
+		border-color: var(--result);
 	}
 	.ruler {
 		position: relative;

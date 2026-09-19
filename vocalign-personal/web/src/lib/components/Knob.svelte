@@ -16,6 +16,8 @@
 		maxLabel?: string;
 		accent?: string;
 		disabled?: boolean;
+		/** Value restored on double-click. Omit to disable the double-click reset. */
+		resetValue?: number;
 	}
 	let {
 		label,
@@ -27,8 +29,13 @@
 		minLabel = '',
 		maxLabel = '',
 		accent = 'var(--guide)',
-		disabled = false
+		disabled = false,
+		resetValue
 	}: Props = $props();
+
+	function clamp(v: number) {
+		return Math.min(max, Math.max(min, v));
+	}
 
 	const SWEEP = 270; // degrees of travel, 8 o'clock → 4 o'clock
 	const START = -135;
@@ -43,22 +50,56 @@
 	const fillLen = $derived(frac * arcLen);
 
 	let dragging = $state(false);
+	let inputEl: HTMLInputElement | undefined = $state();
 
 	function onPointerDown(e: PointerEvent) {
 		if (disabled) return;
+		// The native range input sits underneath for a11y/keyboard only
+		// (pointer-events: none in CSS) — focus it manually so keyboard
+		// users can still tab to/operate it after a click or drag.
+		inputEl?.focus();
 		dragging = true;
 		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 	}
 	function onPointerMove(e: PointerEvent) {
 		if (!dragging || disabled) return;
 		// Vertical drag = the plugin convention; far more precise than
-		// following the pointer angle around a small circle.
-		const delta = -e.movementY / 180;
-		value = Math.min(max, Math.max(min, value + delta * (max - min)));
+		// following the pointer angle around a small circle. Hold Shift for
+		// a fine pass — a flat 1:1 pixel mapping makes it nearly impossible
+		// to land on an exact value across a 270° sweep.
+		const sensitivity = e.shiftKey ? 8 : 1;
+		const delta = -e.movementY / (180 * sensitivity);
+		value = clamp(value + delta * (max - min));
 	}
 	function onPointerUp(e: PointerEvent) {
 		dragging = false;
 		(e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+	}
+
+	// Scroll = nudge by one step, same increment as an arrow key but without
+	// needing focus first. Trackpads fire a stream of small deltas rather
+	// than one clean notch, so accumulate and only fire once a full step's
+	// worth has passed — otherwise a light trackpad graze sends the value
+	// flying.
+	let wheelAccum = 0;
+	const WHEEL_THRESHOLD = 40;
+	function onWheel(e: WheelEvent) {
+		if (disabled) return;
+		e.preventDefault();
+		wheelAccum += e.deltaY;
+		while (wheelAccum >= WHEEL_THRESHOLD) {
+			value = clamp(value - step);
+			wheelAccum -= WHEEL_THRESHOLD;
+		}
+		while (wheelAccum <= -WHEEL_THRESHOLD) {
+			value = clamp(value + step);
+			wheelAccum += WHEEL_THRESHOLD;
+		}
+	}
+
+	function onDblClick() {
+		if (disabled || resetValue === undefined) return;
+		value = clamp(resetValue);
 	}
 </script>
 
@@ -76,6 +117,8 @@
 		onpointermove={onPointerMove}
 		onpointerup={onPointerUp}
 		onpointercancel={onPointerUp}
+		onwheel={onWheel}
+		ondblclick={onDblClick}
 	>
 		<svg viewBox="0 0 64 64" aria-hidden="true">
 			<!-- travel track -->
@@ -116,6 +159,7 @@
 		</svg>
 
 		<input
+			bind:this={inputEl}
 			type="range"
 			{min}
 			{max}
@@ -170,7 +214,14 @@
 	.knob svg {
 		transition: filter var(--fast) var(--ease);
 	}
-	/* Real range input, visually hidden but focusable and keyboard-operable */
+	/* Real range input, visually hidden but focusable and keyboard-operable.
+	   pointer-events: none keeps it out of the hit-test entirely — otherwise
+	   a click/drag lands on the input first and the browser's native
+	   jump-to-click-position behavior fires before onPointerDown runs,
+	   snapping the value to an unrelated spot right before the vertical-drag
+	   handler takes over. All pointer interaction goes through the wrapper
+	   div above; this input only handles keyboard (arrow keys, Home/End)
+	   once focused via inputEl.focus() in onPointerDown. */
 	.knob input[type='range'] {
 		position: absolute;
 		inset: 0;
@@ -178,7 +229,7 @@
 		height: 100%;
 		opacity: 0;
 		margin: 0;
-		cursor: inherit;
+		pointer-events: none;
 	}
 	.knob input[type='range']:focus-visible {
 		opacity: 1;
