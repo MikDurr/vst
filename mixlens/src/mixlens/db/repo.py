@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,8 +20,14 @@ class Repo:
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.db_path))
+        # check_same_thread=False: the UI (Streamlit) reruns the script on a
+        # different worker thread each time and reuses one cached Repo across
+        # reruns, so the connection must be usable from more than the thread
+        # that created it. The lock below is what actually keeps access safe,
+        # since sqlite3 connections still aren't safe for concurrent use.
+        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self._conn.execute("PRAGMA foreign_keys = ON")
+        self._lock = threading.Lock()
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -29,12 +36,17 @@ class Repo:
 
     @contextmanager
     def cursor(self):
-        cur = self._conn.cursor()
-        try:
-            yield cur
-            self._conn.commit()
-        finally:
-            cur.close()
+        with self._lock:
+            cur = self._conn.cursor()
+            try:
+                yield cur
+                self._conn.commit()
+            finally:
+                cur.close()
+
+    def _read_sql(self, query: str, params=()) -> pd.DataFrame:
+        with self._lock:
+            return pd.read_sql_query(query, self._conn, params=params)
 
     def close(self) -> None:
         self._conn.close()
@@ -87,7 +99,7 @@ class Repo:
         if style:
             q += " WHERE style=?"
             params = (style,)
-        return pd.read_sql_query(q, self._conn, params=params)
+        return self._read_sql(q, params)
 
     # -- features / checks --------------------------------------------------
 
@@ -115,7 +127,7 @@ class Repo:
         if entity_id is not None:
             q += " AND entity_id=?"
             params.append(entity_id)
-        return pd.read_sql_query(q, self._conn, params=params)
+        return self._read_sql(q, params)
 
     def get_features_for_style(self, style: str, entity: str = "ref") -> pd.DataFrame:
         if entity == "ref":
@@ -131,10 +143,10 @@ class Repo:
                 "JOIN songs s ON v.song_id = s.song_id "
                 "WHERE s.style = ?"
             )
-        return pd.read_sql_query(q, self._conn, params=(style,))
+        return self._read_sql(q, (style,))
 
     def get_checks(self, version_id: int) -> pd.DataFrame:
-        return pd.read_sql_query("SELECT * FROM checks WHERE version_id=?", self._conn, params=(version_id,))
+        return self._read_sql("SELECT * FROM checks WHERE version_id=?", (version_id,))
 
     # -- envelopes ------------------------------------------------------
 
@@ -147,7 +159,7 @@ class Repo:
             )
 
     def get_envelopes(self, style: str) -> dict[tuple[str, str], Envelope]:
-        df = pd.read_sql_query("SELECT * FROM envelopes WHERE style=?", self._conn, params=(style,))
+        df = self._read_sql("SELECT * FROM envelopes WHERE style=?", (style,))
         out = {}
         for _idx, row in df.iterrows():
             out[(row["feature"], row["band"])] = Envelope(
@@ -169,10 +181,10 @@ class Repo:
             )
 
     def get_labels(self) -> pd.DataFrame:
-        return pd.read_sql_query("SELECT * FROM labels", self._conn)
+        return self._read_sql("SELECT * FROM labels")
 
     def get_versions_for_song(self, song_id: str) -> pd.DataFrame:
-        return pd.read_sql_query("SELECT * FROM versions WHERE song_id=? ORDER BY version_id", self._conn, params=(song_id,))
+        return self._read_sql("SELECT * FROM versions WHERE song_id=? ORDER BY version_id", (song_id,))
 
     def get_all_versions(self) -> pd.DataFrame:
-        return pd.read_sql_query("SELECT * FROM versions", self._conn)
+        return self._read_sql("SELECT * FROM versions")

@@ -30,25 +30,29 @@ def get_config():
 
 def main() -> None:
     st.sidebar.title("MixLens")
-    page = st.sidebar.radio("Page", ["Compare", "History", "References", "Regret"])
+    page = st.sidebar.radio("Page", ["Analyze", "Compare", "History", "References", "Regret"])
 
     repo = get_repo()
     cfg = get_config()
 
-    if page == "Compare":
-        from pages import compare
+    if page == "Analyze":
+        from views import analyze
+
+        analyze.render(repo, cfg, PROJECT_ROOT)
+    elif page == "Compare":
+        from views import compare
 
         compare.render(repo, cfg)
     elif page == "History":
-        from pages import history
+        from views import history
 
         history.render(repo, cfg)
     elif page == "References":
-        from pages import references
+        from views import references
 
         references.render(repo, cfg, PROJECT_ROOT)
     elif page == "Regret":
-        from pages import regret
+        from views import regret
 
         regret.render(repo, cfg)
 

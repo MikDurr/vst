@@ -58,6 +58,9 @@ see `mixlens ref add`.
 
 ## Usage
 
+Everything below has a UI equivalent (`mixlens ui`) — see the next section.
+The CLI is there for scripting or when you'd rather not open a browser tab:
+
 ```bash
 mixlens ref add references/dream/*.flac --style dream
 mixlens ref build-envelopes
@@ -71,11 +74,31 @@ mixlens diff neon_altar v2 v3
 mixlens label neon_altar v1 regret --tag buried --note "hook vocal vanished"
 mixlens regret                                # needs >=5 labeled held_up + regret
 
-mixlens ui                                    # streamlit: compare/history/references/regret
+mixlens ui
 ```
 
 All commands run from the `mixlens/` project root (they read `config.yaml`
 and write `mixlens.db` there).
+
+## UI
+
+```bash
+mixlens ui
+```
+
+opens a Streamlit app with five pages, each backing the CLI commands above:
+
+| Page | Does |
+|---|---|
+| Analyze | Pick a song + version found under `mixes/`, run peak checks or the full analysis (Demucs + all features) |
+| Compare | Peak-safety banner, LTAS vs. style envelope, flag table with hints, space-vs-sheen scatter |
+| History | Feature trends across a song's versions, plus a two-version diff |
+| References | Register reference files by glob + style, build/rebuild envelopes, leave-one-out audit, feature distributions |
+| Regret | Label a version held_up/neutral/regret, and once you have 5+ of each, the effect-size ranking |
+
+The Analyze and References pages call the same `pipeline`/`io` functions the
+CLI does — nothing needs to be re-run afterward to pick up what you did in
+the UI, and vice versa; both read and write the same `mixlens.db`.
 
 ## Calibration
 

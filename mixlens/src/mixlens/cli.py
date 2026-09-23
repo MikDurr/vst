@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 import typer
-import yaml
 from rich.console import Console
 from rich.table import Table
 
@@ -15,7 +14,7 @@ from mixlens.compare.deviation import classify_level
 from mixlens.compare.regret import compare_groups
 from mixlens.config import load_config
 from mixlens.db.repo import Repo
-from mixlens.io.sidecar import load_references_yaml
+from mixlens.io.sidecar import load_references_yaml, register_references
 from mixlens.pipeline import analyze_reference, analyze_version, build_hints, run_checks_only, score_version_against_envelopes
 
 app = typer.Typer(add_completion=False, help="MixLens: measure your mix against reference tracks.")
@@ -51,31 +50,13 @@ def ref_add(
 ):
     """Register audio files into references/references.yaml (does not analyze them)."""
     refs_dir = _references_dir()
-    refs_yaml_path = refs_dir / "references.yaml"
-    existing = load_references_yaml(refs_dir)
-    existing_paths = {e.path for e in existing}
-
-    new_entries = []
-    for pattern in patterns:
-        for p in sorted(Path().glob(pattern)):
-            try:
-                rel = p.resolve().relative_to(refs_dir.resolve())
-            except ValueError:
-                console.print(f"[yellow]Skipping {p}: not under {refs_dir}[/yellow]")
-                continue
-            rel_str = str(rel)
-            if rel_str in existing_paths:
-                continue
-            new_entries.append({"path": rel_str, "style": style, "artist": "", "title": p.stem, "note": ""})
+    new_entries = register_references(patterns, style, refs_dir)
 
     if not new_entries:
         console.print("No new references to add.")
         raise typer.Exit()
 
-    data = yaml.safe_load(refs_yaml_path.read_text()) if refs_yaml_path.exists() else []
-    data = (data or []) + new_entries
-    refs_yaml_path.write_text(yaml.dump(data, sort_keys=False, allow_unicode=True))
-    console.print(f"Added {len(new_entries)} references to {refs_yaml_path}. Fill in artist/title/note by hand.")
+    console.print(f"Added {len(new_entries)} references to {refs_dir / 'references.yaml'}. Fill in artist/title/note by hand.")
 
 
 @ref_app.command("build-envelopes")

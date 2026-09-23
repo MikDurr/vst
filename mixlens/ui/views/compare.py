@@ -16,7 +16,7 @@ def render(repo, cfg) -> None:
 
     versions_df = repo.get_all_versions()
     if versions_df.empty:
-        st.info("No analyzed versions yet. Run `mixlens analyze <mix_dir> --version <v>` first.")
+        st.info("No analyzed versions yet. Use the Analyze page to run one.")
         return
 
     songs = sorted(versions_df["song_id"].unique())
@@ -39,7 +39,7 @@ def render(repo, cfg) -> None:
 
     envelopes = repo.get_envelopes(style)
     if not envelopes:
-        st.warning(f"No envelopes built for style '{style}'. Run `mixlens ref build-envelopes`.")
+        st.warning(f"No envelopes built for style '{style}'. Use the References page to build them.")
         return
 
     features_df = repo.get_features(entity="version", entity_id=version_id)
