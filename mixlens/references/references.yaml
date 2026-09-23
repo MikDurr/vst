@@ -1,0 +1,3 @@
+# Registered reference tracks, one entry per file. Populated by `mixlens ref
+# add references/<style>/*.flac --style <style>`; fill in artist/title/note
+# by hand afterward. See SPEC.md section 1.2 for selection rules.

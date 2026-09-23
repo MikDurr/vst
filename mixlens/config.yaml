@@ -1,0 +1,160 @@
+# MixLens configuration: thresholds, band edges, frame sizes, hint rules.
+# See spec section 9 (Calibration) before trusting flags — freeze this file
+# and record its hash in each analysis once you've tuned it against your ears.
+
+sample_rate: 44100
+loudness_target_lufs: -14.0
+
+stft:
+  tonal: {n_fft: 4096, hop: 1024}
+  transient: {n_fft: 1024, hop: 256}
+
+# A vocal frame (400ms momentary) counts as "active" when its loudness sits
+# within this many LU of the vocal's max.
+active_threshold_lu: 30.0
+
+# 1/3-octave band edges for LTAS, 31.5 Hz to 16 kHz (28 bands), offset so the
+# 250 Hz-4 kHz mean = 0.
+ltas:
+  low_hz: 31.5
+  high_hz: 16000.0
+  ref_low_hz: 250.0
+  ref_high_hz: 4000.0
+
+side_mid_bands:
+  - {name: sub, low: 0, high: 120}
+  - {name: low, low: 120, high: 500}
+  - {name: mid, low: 500, high: 4000}
+  - {name: high, low: 4000, high: 20000}
+
+# Consonant Survival Index (CSI)
+csi:
+  hp_hz: 2000.0
+  window_ms: 40.0
+  margin_db: 6.0
+  erb_low_hz: 2000.0
+  erb_high_hz: 6000.0
+
+# Masking groups (info only)
+mask_groups:
+  - {name: body, low: 200, high: 1000}
+  - {name: presence, low: 1000, high: 4000}
+  - {name: air, low: 4000, high: 20000}
+
+# Space: phrase-end / onset heuristics (section 3.4). Tune during calibration.
+space:
+  phrase_end_drop_db: 15.0
+  phrase_end_window_ms: 100.0
+  active_min_ms: 500.0
+  tail_window_start_ms: 150.0
+  tail_window_end_ms: 400.0
+  decay_window_ms: 300.0
+  strong_onset_percentile: 80.0
+  attack_window_ms: 10.0
+  attack_low_hz: 2000.0
+  attack_high_hz: 8000.0
+
+# Sheen bands (reference path, full mix, loudness-normalized)
+sheen:
+  air_low_hz: 10000.0
+  air_high_hz: 16000.0
+  presence_low_hz: 4000.0
+  presence_high_hz: 10000.0
+  ref_low_hz: 1000.0
+  ref_high_hz: 4000.0
+  hf_hz: 4000.0
+  hf_density_window_ms: 100.0
+  side_mid_air_hz: 8000.0
+
+# Peak safety checks (section 2)
+peaks:
+  clip_run_samples: 3
+  clip_threshold_fs: 0.999
+  true_peak_fail_dbtp: 0.0
+  true_peak_warn_dbtp: -1.0
+  oversample_factor: 4
+  stem_headroom_warn_dbfs: -0.3
+  flat_top_threshold_fs: 0.95
+  codec_check_enabled: false
+  codec_bitrate_kbps: 256
+
+# Micro-dynamics: st_crest, transient_ratio, band_crest_{low,mid,high},
+# pump_depth (whole mix); vox_crest (vocal); vox_floor_true (internal path).
+microdynamics:
+  window_ms: 50.0
+  onset_percentile: 80.0
+  transient_post_start_ms: 100.0
+  transient_post_end_ms: 300.0
+  bands:
+    - {name: low, low: 20, high: 250}
+    - {name: mid, low: 250, high: 4000}
+    - {name: high, low: 4000, high: 20000}
+  kick_band_hz: 120.0
+  pump_measure_low_hz: 200.0
+  pump_measure_high_hz: 8000.0
+  pump_baseline_ms: 50.0
+  pump_window_start_ms: 50.0
+  pump_window_end_ms: 300.0
+
+# Translation simulations (section 3.5)
+translation:
+  phone_hp_hz: 300.0
+  phone_lp_hz: 8000.0
+  butterworth_order: 4
+
+# Comparison logic (section 4)
+deviation:
+  watch_z: 1.5
+  flag_z: 2.5
+
+# Hint rules: (feature, direction, message). Evaluated against deviation
+# levels computed in compare/deviation.py. `low`/`high` mean the direction of
+# the robust z-score; combos require every listed condition to hold.
+hints:
+  - id: csi_low
+    conditions: [{feature: csi, direction: low}]
+    message: "Consonants masked. Check the inst 2-5 kHz under the vocal, and csi_wash_drop_true."
+  - id: vir_med_high
+    conditions: [{feature: vir_med, direction: high}]
+    message: "Vocal sits more forward than your references."
+  - id: space_contrast_low
+    conditions: [{feature: space_contrast, direction: low}]
+    message: "Vocal and instrumental share the same space. Dry the instrumental or push more vocal reverb."
+  - id: vox_tail_buries
+    conditions: [{feature: vox_tail_level, direction: high}, {feature: csi, direction: low}]
+    message: "Vocal reverb burying the words. Add ducking or pre-delay before cutting the reverb level."
+  - id: air_ratio_low
+    conditions: [{feature: air_ratio, direction: low}]
+    message: "Top end duller than references. Try a high shelf on the mix bus or brighter vocal/synth sources."
+  - id: hf_density_high
+    conditions: [{feature: hf_density, direction: high}]
+    message: "Top end peaky rather than dense. More saturation or upward compression (OTT) on bright elements."
+  - id: hf_fizzy
+    conditions: [{feature: hf_flatness, direction: high}, {feature: vox_sib, direction: high}]
+    message: "Top end fizzy or harsh rather than polished. Check stacked distortion and de-essing."
+  - id: vox_tail_bright_low
+    conditions: [{feature: vox_tail_bright, direction: low}]
+    message: "Tail darker than references. Raise reverb high cut or add a high shelf on the aux."
+  - id: duck_depth_true_low
+    conditions: [{feature: duck_depth_true, direction: low_abs}]
+    message: "Reverb isn't ducking under the dry vocal. Add sidechain compression on the aux keyed from the dry vocal."
+  - id: vox_sib_high
+    conditions: [{feature: vox_sib, direction: high}]
+    message: "Sibilance above references. Check de-essing before bright reverb sends."
+  - id: csi_phone_drop
+    conditions: [{feature: csi_phone_delta, direction: below, threshold: -0.15}]
+    message: "Blend collapses on small speakers."
+  - id: over_compressed
+    conditions: [{feature: st_crest, direction: low}, {feature: transient_ratio, direction: low}]
+    message: "Mix flattened below your references. Ease the bus compressor or limiter, or the OTT depth."
+  - id: pumping
+    conditions: [{feature: pump_depth, direction: high}]
+    message: "More pumping than your references. Check bus compressor release or sidechain depth."
+  - id: noisy_gaps
+    conditions: [{feature: vox_floor_true, direction: high}]
+    message: "Vocal gaps lifted. Upward compression is raising breaths and noise, so gate before OTT or reduce its upward amount."
+  - id: under_compressed
+    conditions:
+      - {feature: vox_consistency, direction: high}
+      - {feature: csi_p10, direction: gap_below, other: csi, threshold: 0.15}
+    message: "Vocal level uneven; quiet words sink below the mix. More compression or level riding."
