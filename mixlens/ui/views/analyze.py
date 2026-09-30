@@ -115,6 +115,59 @@ def _render_check_results(results: list[CheckResult]) -> None:
         st.success("Peak safety: all checks pass.")
 
 
+STEMS_HELP = """\
+| Stem | Contains |
+|---|---|
+| `mix` | Everything, final master chain **on** (what listeners hear) |
+| `vox_dry` | The vocal after its normal channel processing (EQ, comp, de-ess, tuning, distortion), **without** reverb/delay |
+| `vox_wet` | **Only** the vocal reverb/delay returns, no dry vocal in it |
+| `inst` | Everything except vocals and the vocal returns, keeping its own processing |
+
+All four: same length, same start point (bar 1). The master chain is **bypassed on every stem except `mix`**.
+
+**Why split it:** dry + wet lets MixLens judge your reverb separately (how wet it is, whether it ducks, whether it
+washes out consonants). Bypassing the master keeps the limiter from smearing those measurements.
+"""
+
+LOGIC_HELP = """\
+Logic has no "export a stem" button for this: you mute things and do a normal bounce, four times. Menu names are for
+Logic Pro X / 10.x; always **listen to each bounce** before uploading.
+
+**Set up once**
+1. Set the cycle range from bar 1 to the end of the song. Use the **same range for all four bounces**, so the files
+   are the same length and start together.
+2. Sort your tracks into three groups: **vocal tracks** (lead, doubles, ad-libs, harmonies), **vocal FX returns**
+   (the reverb/delay/chorus aux tracks your vocal sends feed), and **everything else**.
+3. Bounce with **File → Bounce → Project or Section** (Cmd-B): PCM, WAV, **24-bit**, sample rate matching your
+   project, **Normalize: Off**, **Include Audio Tail: On**.
+4. Use **mute**, not solo. Logic can keep an aux audible when you solo the track feeding it, so muting is more predictable.
+
+**The bounces**
+
+| Stem | What to do before bouncing |
+|---|---|
+| `mix` | Mute nothing, master chain **on**. A normal final bounce. |
+| `inst` | Mute all vocal tracks **and** all vocal FX returns. Bypass the plug-ins on **Stereo Out**. |
+| `vox_dry` | Mute everything that isn't a vocal track, and mute the vocal FX returns. Bypass Stereo Out plug-ins. |
+| `vox_full` | Mute everything that isn't a vocal track, **leave the vocal FX returns on**. Bypass Stereo Out plug-ins. |
+
+**`vox_wet`: easiest route.** Upload `vox_full` and `vox_dry`, leave `vox_wet` empty, and MixLens computes
+`vox_wet = vox_full - vox_dry`. This only cancels cleanly if the bounces are sample-aligned and the vocal processing
+is identical in both (reverbs with random modulation leave a small residual). MixLens refuses misaligned files and
+warns if the result looks wrong.
+
+**`vox_wet`: bounce it directly.** Mute the non-vocal tracks and keep the vocal FX returns on. Right-click each vocal
+send level and choose **Pre Fader**, then pull the vocal tracks' own faders to -∞ so the sends keep feeding the
+reverb while the dry vocal is silent. Bypass Stereo Out plug-ins and bounce.
+
+**Check before uploading**
+- `vox_dry` has no reverb tails. `vox_wet` has no dry words. `inst` has no vocal.
+- All four files are the same length.
+- If a reverb or delay is shared between the vocal and other instruments, split it into a vocal-only return first, otherwise
+  the instruments' reverb ends up in the wrong stem.
+"""
+
+
 def _go_to_compare(song: str, version: str) -> None:
     """Jump to the Compare page with this version selected."""
     st.session_state["nav_target"] = "Compare"
@@ -130,20 +183,9 @@ def _render_upload(repo, cfg, project_root: Path, songs: dict[str, Path], expand
             "`inst`, `mix` are recognised; fix any wrong guess below."
         )
         with st.expander("What are the four stems?"):
-            st.markdown(
-                "Bounce all four from the start of bar 1, same length. Master chain is **bypassed on every stem except `mix`**.\n\n"
-                "| Stem | Contains | How to bounce |\n|---|---|---|\n"
-                "| `mix` | Everything, final master chain **on** (what listeners hear) | Normal final bounce |\n"
-                "| `vox_dry` | The vocal after its normal channel processing (EQ, comp, de-ess, tuning, distortion) "
-                "but **without** reverb/delay | Vocal bus, send returns muted |\n"
-                "| `vox_wet` | **Only** the vocal reverb/delay returns, no dry vocal in it | Solo the aux returns, mute the vocal's direct signal |\n"
-                "| `inst` | Everything except vocals and the vocal returns, keeping its own processing | Mute vocals and vocal auxes |\n\n"
-                "**Shortcut for `vox_wet`:** instead, bounce `vox_full` (vocal tracks **and** their reverb/delay returns, "
-                "master bypassed) and drop it in with `vox_dry`. MixLens computes `vox_wet = vox_full - vox_dry`. "
-                "Both bounces must use the same range and start point.\n\n"
-                "Why split it: dry + wet lets MixLens judge your reverb separately (how wet it is, whether it ducks, "
-                "whether it washes out consonants). Bypassing the master keeps the limiter from smearing those measurements."
-            )
+            st.markdown(STEMS_HELP)
+        with st.expander("How to export them from Logic Pro"):
+            st.markdown(LOGIC_HELP)
         for w in st.session_state.pop("derive_warnings", []):
             st.warning("Derived vox_wet: " + w + " The stems were saved, but not analyzed automatically.")
         files = st.file_uploader("Stems", type=AUDIO_TYPES, accept_multiple_files=True, key="up_files")
