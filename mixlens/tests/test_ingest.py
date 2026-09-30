@@ -69,3 +69,72 @@ def test_assign_stems_never_double_books_a_slot():
     assert got["a_vox_dry.wav"] == "vox_dry"
     assert got["b_vocal.wav"] is None
     assert got["c_inst.wav"] == "inst"
+
+
+def _stereo_wav(x, sr=44100):
+    buf = io.BytesIO()
+    sf.write(buf, x, sr, format="WAV", subtype="PCM_24")
+    return buf.getvalue()
+
+
+def _synth(seed=0, n=44100 * 4):
+    """Bursty band-limited noise as a stand-in vocal (a pure tone would make the
+    alignment check ambiguous), with a noise-burst reverb as its returns."""
+    rng = np.random.default_rng(seed)
+    t = np.arange(n) / 44100
+    env = np.clip(np.sin(2 * np.pi * 1.5 * t), 0, None)[:, None]
+    dry = 0.08 * env * rng.standard_normal((n, 2))
+    ir = np.exp(-np.arange(6000) / 1200) * rng.standard_normal(6000) * 0.03
+    wet = np.stack([np.convolve(dry[:, c], ir)[:n] for c in range(2)], axis=1)
+    return dry, wet
+
+
+def test_derive_wet_recovers_the_returns():
+    from mixlens.io.ingest import derive_wet
+
+    dry, wet = _synth()
+    out, warnings = derive_wet(_stereo_wav(dry + wet), _stereo_wav(dry))
+    got, _ = sf.read(io.BytesIO(out), dtype="float64", always_2d=True)
+    assert warnings == []
+    assert np.max(np.abs(got - wet)) < 1e-4
+
+
+def test_derive_wet_rejects_misaligned_and_mismatched_bounces():
+    from mixlens.io.ingest import derive_wet
+
+    dry, wet = _synth()
+    full = dry + wet
+    shifted = np.roll(full, 200, axis=0)
+    with pytest.raises(ValueError, match="offset"):
+        derive_wet(_stereo_wav(shifted), _stereo_wav(dry))
+    with pytest.raises(ValueError, match="length"):
+        derive_wet(_stereo_wav(full[:-44100]), _stereo_wav(dry))
+    with pytest.raises(ValueError, match="sample rate|Hz"):
+        derive_wet(_stereo_wav(full, 48000), _stereo_wav(dry, 44100))
+
+
+def test_derive_wet_warns_when_dry_does_not_cancel_or_returns_absent():
+    from mixlens.io.ingest import derive_wet
+
+    dry, wet = _synth()
+    _, w1 = derive_wet(_stereo_wav(dry), _stereo_wav(dry))
+    assert any("silent" in w or "identical" in w for w in w1)
+    _, w2 = derive_wet(_stereo_wav(dry * 2.5 + wet), _stereo_wav(dry))  # dry level differs between bounces
+    assert w2
+
+
+def test_guess_stem_recognises_vox_full():
+    from mixlens.io.ingest import guess_stem
+
+    assert guess_stem("Neon Altar - Vocal Full (with FX).wav") == "vox_full"
+    assert guess_stem("neon_altar_vox_all.wav") == "vox_full"
+    assert guess_stem("neon_altar_full_mix.wav") == "mix"
+    assert guess_stem("vox_dry.wav") == "vox_dry"
+
+
+def test_derive_wet_rejects_gross_offset():
+    from mixlens.io.ingest import derive_wet
+
+    dry, wet = _synth()
+    with pytest.raises(ValueError, match="offset"):
+        derive_wet(_stereo_wav(np.roll(dry + wet, 30000, axis=0)), _stereo_wav(dry))

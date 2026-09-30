@@ -8,7 +8,9 @@ import pandas as pd
 import streamlit as st
 
 from mixlens.checks.peaks import CheckResult, any_fail
-from mixlens.io.ingest import AUDIO_TYPES, assign_stems, guess_song_version, save_sections, save_stems
+from mixlens.io.ingest import (
+    AUDIO_TYPES, assign_stems, derive_wet, guess_song_version, save_sections, save_stems,
+)
 from mixlens.io.sidecar import load_song_yaml
 from mixlens.io.stems import STEM_NAMES
 from mixlens.pipeline import analyze_version, run_checks_only
@@ -136,9 +138,14 @@ def _render_upload(repo, cfg, project_root: Path, songs: dict[str, Path], expand
                 "but **without** reverb/delay | Vocal bus, send returns muted |\n"
                 "| `vox_wet` | **Only** the vocal reverb/delay returns, no dry vocal in it | Solo the aux returns, mute the vocal's direct signal |\n"
                 "| `inst` | Everything except vocals and the vocal returns, keeping its own processing | Mute vocals and vocal auxes |\n\n"
+                "**Shortcut for `vox_wet`:** instead, bounce `vox_full` (vocal tracks **and** their reverb/delay returns, "
+                "master bypassed) and drop it in with `vox_dry`. MixLens computes `vox_wet = vox_full - vox_dry`. "
+                "Both bounces must use the same range and start point.\n\n"
                 "Why split it: dry + wet lets MixLens judge your reverb separately (how wet it is, whether it ducks, "
                 "whether it washes out consonants). Bypassing the master keeps the limiter from smearing those measurements."
             )
+        for w in st.session_state.pop("derive_warnings", []):
+            st.warning("Derived vox_wet: " + w + " The stems were saved, but not analyzed automatically.")
         files = st.file_uploader("Stems", type=AUDIO_TYPES, accept_multiple_files=True, key="up_files")
 
         by_name = {f.name: f for f in files or []}
@@ -150,7 +157,7 @@ def _render_upload(repo, cfg, project_root: Path, songs: dict[str, Path], expand
             st.session_state["up_song"] = parsed[0]
             st.session_state["up_version"] = parsed[1]
 
-        slots = ["(ignore)"] + list(STEM_NAMES)
+        slots = ["(ignore)"] + list(STEM_NAMES) + ["vox_full"]
         assignment: dict[str, str] = {}
         if by_name:
             st.markdown("**Which file is which**")
@@ -165,8 +172,11 @@ def _render_upload(repo, cfg, project_root: Path, songs: dict[str, Path], expand
 
         chosen = [n for n in by_name if n in assignment.values()]
         dupes = len(chosen) != len(set(assignment.values())) or len(assignment) != len(chosen)
-        missing = [s for s in STEM_NAMES if s not in assignment]
+        derive = "vox_wet" not in assignment and "vox_full" in assignment
+        missing = [s for s in STEM_NAMES if s not in assignment and not (s == "vox_wet" and derive)]
         if by_name:
+            if derive:
+                st.info("No vox_wet given: it will be derived as vox_full minus vox_dry. Both bounces must start at the same point.")
             if dupes:
                 st.error("Two files are assigned to the same slot.")
             elif missing:
@@ -202,10 +212,18 @@ def _render_upload(repo, cfg, project_root: Path, songs: dict[str, Path], expand
 
         if save_only or one_click:
             try:
-                song_dir = save_stems(
-                    project_root / "mixes", name, version, style, bpm,
-                    {stem: by_name[fname].getvalue() for stem, fname in assignment.items()},
-                )
+                stem_bytes = {
+                    stem: by_name[fname].getvalue() for stem, fname in assignment.items() if stem != "vox_full"
+                }
+                derive_warnings: list[str] = []
+                if derive:
+                    stem_bytes["vox_wet"], derive_warnings = derive_wet(
+                        by_name[assignment["vox_full"]].getvalue(), stem_bytes["vox_dry"]
+                    )
+                song_dir = save_stems(project_root / "mixes", name, version, style, bpm, stem_bytes)
+                if derive_warnings:
+                    st.session_state["derive_warnings"] = derive_warnings
+                    one_click = False  # don't auto-analyze a derived stem that looks suspect
                 secs = {
                     str(r["section"]): (r["start"], r["end"])
                     for _, r in sections_df.iterrows()

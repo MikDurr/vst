@@ -94,6 +94,9 @@ def guess_stem(filename: str) -> str | None:
         return m["stem"]
     flat = re.sub(r"[\s\-.]+", "_", Path(name).stem.lower())
     squashed = flat.replace("_", "")
+    tokens = set(flat.split("_"))
+    if tokens & {"vox", "vocal", "vocals", "voc"} and tokens & {"full", "all", "combined", "complete", "total"}:
+        return "vox_full"
     for stem, hints in _STEM_HINTS:
         if any(h in flat or h in squashed for h in hints):
             return stem
@@ -124,3 +127,109 @@ def assign_stems(filenames: list[str]) -> dict[str, str | None]:
             taken.add(g)
         out[f] = g
     return out
+
+
+def derive_wet(full_bytes: bytes, dry_bytes: bytes, max_offset_ms: float = 0.0) -> tuple[bytes, list[str]]:
+    """Build `vox_wet` as `vox_full - vox_dry`.
+
+    `vox_full` is the vocal tracks plus their reverb/delay returns; `vox_dry`
+    is the same vocal with the returns muted, so the difference is the returns
+    alone. Only valid if both bounces are sample-aligned and identical apart
+    from the returns, so this refuses misaligned input and warns when the
+    result looks like the dry vocal didn't cancel (e.g. random reverb
+    modulation, or a plug-in that changes when the sends are muted).
+
+    Returns (24-bit WAV bytes, warnings).
+    """
+    import numpy as np
+
+    full, sr_f = sf.read(io.BytesIO(full_bytes), dtype="float64", always_2d=True)
+    dry, sr_d = sf.read(io.BytesIO(dry_bytes), dtype="float64", always_2d=True)
+    if sr_f != sr_d:
+        raise ValueError(f"vox_full is {sr_f} Hz but vox_dry is {sr_d} Hz: bounce both at the same sample rate.")
+
+    if full.shape[1] != dry.shape[1]:
+        ch = max(full.shape[1], dry.shape[1])
+        full = np.repeat(full, ch, axis=1) if full.shape[1] == 1 else full
+        dry = np.repeat(dry, ch, axis=1) if dry.shape[1] == 1 else dry
+
+    tol = int(0.01 * sr_f)
+    if abs(len(full) - len(dry)) > tol:
+        raise ValueError(
+            f"vox_full and vox_dry differ in length by {abs(len(full) - len(dry)) / sr_f:.2f}s: "
+            "bounce both over the same range."
+        )
+    n = min(len(full), len(dry))
+    full, dry = full[:n], dry[:n]
+
+    offset = _best_lag(full.mean(axis=1), dry.mean(axis=1), sr_f)
+    if abs(offset) > int(max_offset_ms / 1000.0 * sr_f):
+        raise ValueError(
+            f"vox_full and vox_dry are offset by {offset} samples ({offset / sr_f * 1000:.1f} ms), "
+            "so subtracting would leave garbage. Bounce both from the same start point."
+        )
+
+    wet = full - dry
+    warnings: list[str] = []
+
+    def rms(x):
+        return float(np.sqrt(np.mean(x ** 2)) + 1e-12)
+
+    if rms(wet) > rms(dry) * 2:
+        warnings.append("The derived wet is much louder than the dry vocal. Check the reverb returns aren't also in vox_dry.")
+    if rms(wet) < rms(full) * 1e-3:
+        warnings.append("The derived wet is almost silent: vox_full and vox_dry look identical (were the returns muted in both?).")
+    a, b = wet.mean(axis=1), dry.mean(axis=1)
+    denom = float(np.linalg.norm(a) * np.linalg.norm(b))
+    corr = abs(float(np.dot(a, b))) / denom if denom > 0 else 0.0
+    if corr > 0.5:
+        warnings.append(
+            f"The derived wet still correlates strongly with the dry vocal ({corr:.2f}): the dry didn't fully cancel. "
+            "Plug-ins with random modulation or different settings between bounces cause this; bounce vox_wet directly instead."
+        )
+
+    buf = io.BytesIO()
+    sf.write(buf, wet.astype("float32"), sr_f, format="WAV", subtype="PCM_24")
+    return buf.getvalue(), warnings
+
+
+def _first_onset(x, frac: float = 0.02) -> int:
+    """Index of the first sample above `frac` of the signal's own peak."""
+    import numpy as np
+
+    peak = float(np.max(np.abs(x))) if len(x) else 0.0
+    if peak <= 0:
+        return 0
+    return int(np.argmax(np.abs(x) > frac * peak))
+
+
+def _best_lag(full, dry, sr: int, seconds: float = 10.0, max_lag: int = 128, onset_tol_ms: float = 5.0) -> int:
+    """How far `dry` must shift to best cancel inside `full` (0 when aligned).
+
+    Reverb tails bias a plain cross-correlation, so this instead (1) compares
+    first onsets to catch gross offsets -- a reverb can't start before the dry
+    vocal -- and (2) picks the small integer lag whose subtraction leaves the
+    least residual energy.
+    """
+    import numpy as np
+
+    onset_gap = _first_onset(full) - _first_onset(dry)
+    if abs(onset_gap) > int(onset_tol_ms / 1000.0 * sr):
+        return onset_gap
+
+    # analyse the loudest stretch rather than a possibly-silent intro
+    n = min(len(full), len(dry), int(seconds * sr))
+    hop = max(1, sr // 2)
+    starts = range(0, max(1, min(len(full), len(dry)) - n + 1), hop)
+    start = max(starts, key=lambda s: float(np.sum(dry[s:s + n] ** 2)))
+    f, d = full[start:start + n], dry[start:start + n]
+    if not (np.any(f) and np.any(d)):
+        return 0
+
+    best, best_res = 0, None
+    for lag in range(-max_lag, max_lag + 1):
+        shifted = np.roll(d, lag)
+        res = float(np.sum((f[max_lag:-max_lag] - shifted[max_lag:-max_lag]) ** 2))
+        if best_res is None or res < best_res:
+            best, best_res = lag, res
+    return best
