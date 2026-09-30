@@ -10,7 +10,8 @@ import streamlit as st
 
 from mixlens.compare.deviation import classify_level
 from mixlens.compare.envelope import build_envelopes, leave_one_out_audit
-from mixlens.io.sidecar import load_references_yaml, register_references
+from mixlens.io.ingest import AUDIO_TYPES, save_references
+from mixlens.io.sidecar import load_references_yaml, update_reference_meta
 from mixlens.pipeline import analyze_reference
 
 KNOWN_STYLES = ["dream", "hyperpop", "electroclash"]
@@ -34,10 +35,7 @@ def render(repo, cfg, project_root) -> None:
     style_entries = [e for e in entries if e.style == style]
 
     st.subheader(f"{len(style_entries)} references")
-    st.dataframe(
-        pd.DataFrame([{"path": e.path, "artist": e.artist, "title": e.title, "note": e.note} for e in style_entries]),
-        use_container_width=True,
-    )
+    _render_metadata_editor(references_dir, style_entries)
     if len(style_entries) < 8:
         st.caption(
             f"Only {len(style_entries)} references for '{style}' -- the spec recommends 12-20; "
@@ -64,27 +62,39 @@ def render(repo, cfg, project_root) -> None:
 
 
 def _render_add_references(references_dir: Path, known_styles: list[str], entries: list) -> None:
-    with st.expander("Add references", expanded=not entries):
+    with st.expander("Upload references", expanded=not entries):
         st.caption(
-            "Point this at a folder of full, untouched reference songs under "
-            "`references/<style>/` (WAV/FLAC, or 256kbps+ AAC / 320kbps MP3). "
-            "This only registers the files in references.yaml -- it doesn't "
-            "analyze them yet."
+            "Full, untouched songs (WAV/FLAC, or 256kbps+ AAC / 320kbps MP3). "
+            "Choose ones whose *mix* you want yours to sit near: 12-20 per style, "
+            "max 3 per artist. Files are stored as-is under `references/<style>/`."
         )
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            style = st.selectbox("Style", known_styles, key="add_ref_style")
-        with col2:
-            default_pattern = str(Path("references") / style / "*.flac")
-            pattern = st.text_input("File glob (relative to the project root)", value=default_pattern, key="add_ref_pattern")
-
-        if st.button("Register matching files"):
-            added = register_references([pattern], style, references_dir)
+        style = st.selectbox("Style", known_styles, key="add_ref_style")
+        files = st.file_uploader(
+            "Reference songs", type=AUDIO_TYPES, accept_multiple_files=True, key=f"add_ref_files_{style}"
+        )
+        if st.button("Add to library", disabled=not files):
+            added = save_references(references_dir, style, [(f.name, f.getvalue()) for f in files])
             if added:
-                st.success(f"Registered {len(added)} new reference(s): " + ", ".join(e.path for e in added))
+                st.success(f"Added {len(added)} reference(s). Fill in artist/title below, then build envelopes.")
                 st.rerun()
             else:
-                st.warning("No new files matched -- either none were found, or they're already registered.")
+                st.warning("Those files are already in the library.")
+
+
+def _render_metadata_editor(references_dir: Path, style_entries: list) -> None:
+    st.caption("Double-click a cell to edit artist / title / note. Notes help you remember why a track is in the set.")
+    df = pd.DataFrame([{"path": e.path, "artist": e.artist, "title": e.title, "note": e.note} for e in style_entries])
+    edited = st.data_editor(df, use_container_width=True, disabled=["path"], hide_index=True, key="ref_editor")
+    if not edited.equals(df) and st.button("Save edits"):
+        for _, row in edited.iterrows():
+            update_reference_meta(references_dir, row["path"], row["artist"], row["title"], row["note"])
+        st.success("Saved.")
+        st.rerun()
+
+    artists = edited["artist"].replace("", pd.NA).dropna().value_counts()
+    over = artists[artists > 3]
+    if len(over):
+        st.warning("More than 3 tracks by: " + ", ".join(over.index) + " -- the envelope will reflect one engineer's fingerprint.")
 
 
 def _render_build_envelopes(repo, cfg, references_dir: Path, style: str, style_entries: list) -> None:
