@@ -4,6 +4,8 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from mixlens.compare.glossary import feature_name, trend_note, what_it_measures
+
 from plots import history_line_figure
 
 TRACKED_FEATURES = ["vir_med", "csi", "space_contrast", "air_ratio", "true_peak"]
@@ -11,6 +13,14 @@ TRACKED_FEATURES = ["vir_med", "csi", "space_contrast", "air_ratio", "true_peak"
 
 def render(repo, cfg) -> None:
     st.header("History")
+    with st.expander("How to read this page", expanded=False):
+        st.markdown(
+            "Each chart follows one measurement across the versions of a song, oldest to newest, so you can see "
+            "whether a change actually moved the thing you were trying to fix.\n\n"
+            "- Read the **trend**, not the absolute number. The numbers mean most on the Compare page, against references.\n"
+            "- A metric that barely changes between versions means your edits weren't touching it.\n"
+            "- **Diff two versions** at the bottom lists every measurement that changed, biggest first."
+        )
 
     versions_df = repo.get_all_versions()
     if versions_df.empty:
@@ -46,6 +56,12 @@ def render(repo, cfg) -> None:
             continue
         with cols[i % 2]:
             st.plotly_chart(history_line_figure(df, feature), use_container_width=True)
+            sub = df[df["feature"] == feature]["value"].tolist()
+            st.caption(f"**{feature_name(feature)}**: {what_it_measures(feature)}")
+            if len(sub) >= 2:
+                st.caption(trend_note(feature, sub[0], sub[-1]))
+            else:
+                st.caption("Analyze another version to see a trend.")
 
     _render_diff(repo, song, song_versions)
 
@@ -79,11 +95,14 @@ def _render_diff(repo, song: str, song_versions: pd.DataFrame) -> None:
         delta = vb - va
         if abs(delta) < 1e-6:
             continue
-        rows.append({"feature": feature, "band": band, version_a: va, version_b: vb, "delta": delta})
+        rows.append(
+            {"measurement": feature_name(feature) + (f" [{band}]" if band else ""), version_a: va, version_b: vb, "delta": delta}
+        )
 
     if not rows:
         st.caption("No feature differences between these versions.")
         return
 
     diff_df = pd.DataFrame(rows).sort_values("delta", key=abs, ascending=False)
-    st.dataframe(diff_df, use_container_width=True)
+    st.caption("Sorted by size of change. Sizes aren't comparable across measurements (they use different units).")
+    st.dataframe(diff_df, use_container_width=True, hide_index=True)

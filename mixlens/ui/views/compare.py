@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from mixlens.compare.deviation import evaluate
+from mixlens.compare.glossary import explain, feature_name, what_it_measures
 from mixlens.pipeline import build_hints
 
 from plots import csi_timeline_figure, ltas_vs_envelope_figure, space_sheen_scatter
@@ -13,6 +14,18 @@ from plots import csi_timeline_figure, ltas_vs_envelope_figure, space_sheen_scat
 
 def render(repo, cfg) -> None:
     st.header("Compare")
+    with st.expander("How to read this page"):
+        st.markdown(
+            "This compares **one mix version** with the **reference set for its style**, "
+            "i.e. songs whose mix you chose as the target.\n\n"
+            "- **Peak safety** is pass/fail and independent of the references: clipping, true-peak overs, headroom.\n"
+            "- **Flags and watches** list measurements outside the range your references cover. "
+            "*ok* = inside the references' p10-p90 range; *watch* = moderately outside (z between 1.5 and 2.5, a hint only); "
+            "*flag* = clearly outside (z above 2.5). z is how many 'typical spreads' you are from the reference median.\n"
+            "- **Hints** are suggested fixes that trigger when specific measurements deviate together.\n"
+            "- A flag is not an error. If your references don't share the sound you want, the flag is telling you about your "
+            "references. The numbers only say how your mix differs from them."
+        )
 
     versions_df = repo.get_all_versions()
     if versions_df.empty:
@@ -54,7 +67,12 @@ def render(repo, cfg) -> None:
         if env:
             results.append(evaluate(r["value"], env, cfg))
 
-    st.subheader("LTAS vs style envelope")
+    st.subheader("Tonal balance vs references")
+    st.caption(
+        "Your mix's average spectrum (red line) against the band covering the middle 80% of your references "
+        "(shaded). 0 dB is the average level between 250 Hz and 4 kHz, so this shows shape, not loudness. "
+        "Where the line leaves the band, your mix is brighter/darker/bassier than nearly all references in that region."
+    )
     env_df = pd.DataFrame([e.__dict__ for e in envelopes.values()])
     fig = ltas_vs_envelope_figure(features_df, env_df)
     st.plotly_chart(fig, use_container_width=True)
@@ -63,19 +81,54 @@ def render(repo, cfg) -> None:
     flagged = [r for r in results if r.level != "ok"]
     if flagged:
         flag_df = pd.DataFrame(
-            [{"feature": r.feature, "band": r.band, "value": r.value, "z": r.z, "level": r.level} for r in flagged]
+            [
+                {
+                    "measurement": feature_name(r.feature) + (f" [{r.band}]" if r.band else ""),
+                    "level": r.level,
+                    "your value": round(r.value, 2),
+                    "z": round(r.z, 2),
+                    "meaning": explain(r.feature, r.direction),
+                    "feature": r.feature,
+                }
+                for r in flagged
+            ]
         )
-        st.dataframe(flag_df.sort_values("z", key=abs, ascending=False), use_container_width=True)
+        st.dataframe(
+            flag_df.sort_values("z", key=abs, ascending=False),
+            use_container_width=True, hide_index=True,
+            column_config={"meaning": st.column_config.TextColumn("what it means", width="large")},
+        )
+        with st.expander("What each measurement is"):
+            for feat in sorted({r.feature for r in flagged}):
+                st.markdown(f"**{feature_name(feat)}** (`{feat}`): {what_it_measures(feat)}")
     else:
         st.success("Nothing outside p10-p90 or |z| > 1.5.")
 
     hints = build_hints(results, repo, version_id, cfg)
     if hints:
         st.subheader("Hints")
+        st.caption("Suggested fixes, each with the measurements that triggered it.")
+        rules = {r["id"]: r for r in cfg.get("hints", [])}
+        by_feature = {r.feature: r for r in results}
+        raw = {row["feature"]: row["value"] for _i, row in features_df.iterrows() if row["band"] == ""}
         for h in hints:
-            st.markdown(f"- {h['message']}")
+            st.markdown(f"**{h['message']}**")
+            why = []
+            for cond in rules.get(h["id"], {}).get("conditions", []):
+                f = cond["feature"]
+                if f in by_feature and cond["direction"] in ("low", "high"):
+                    why.append(f"{feature_name(f)} is {cond['direction']} (z = {by_feature[f].z:+.1f})")
+                elif f in raw:
+                    why.append(f"{feature_name(f)} = {raw[f]:.2f}")
+            if why:
+                st.caption("Because: " + "; ".join(why))
 
     st.subheader("Space vs sheen")
+    st.caption(
+        "The two things that define this sound. **Right = wetter vocal over a drier instrumental** (space contrast). "
+        "**Up = brighter, airier top end** (air ratio). Grey dots are your references; the star is this mix. "
+        "You want the star inside the cloud of references you like."
+    )
     ref_features = repo.get_features_for_style(style, entity="ref")
     scatter_rows = []
     for ref_id, group in ref_features.groupby("entity_id"):

@@ -127,6 +127,18 @@ def _render_upload(repo, cfg, project_root: Path, songs: dict[str, Path], expand
             "vocal dry, vocal reverb/delay returns only, and instrumental. Names like `vox_dry`, `wet`, "
             "`inst`, `mix` are recognised; fix any wrong guess below."
         )
+        with st.expander("What are the four stems?"):
+            st.markdown(
+                "Bounce all four from the start of bar 1, same length. Master chain is **bypassed on every stem except `mix`**.\n\n"
+                "| Stem | Contains | How to bounce |\n|---|---|---|\n"
+                "| `mix` | Everything, final master chain **on** (what listeners hear) | Normal final bounce |\n"
+                "| `vox_dry` | The vocal after its normal channel processing (EQ, comp, de-ess, tuning, distortion) "
+                "but **without** reverb/delay | Vocal bus, send returns muted |\n"
+                "| `vox_wet` | **Only** the vocal reverb/delay returns, no dry vocal in it | Solo the aux returns, mute the vocal's direct signal |\n"
+                "| `inst` | Everything except vocals and the vocal returns, keeping its own processing | Mute vocals and vocal auxes |\n\n"
+                "Why split it: dry + wet lets MixLens judge your reverb separately (how wet it is, whether it ducks, "
+                "whether it washes out consonants). Bypassing the master keeps the limiter from smearing those measurements."
+            )
         files = st.file_uploader("Stems", type=AUDIO_TYPES, accept_multiple_files=True, key="up_files")
 
         by_name = {f.name: f for f in files or []}
