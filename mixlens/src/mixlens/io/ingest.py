@@ -72,3 +72,55 @@ def save_references(references_dir: Path, style: str, files: list[tuple[str, byt
         dest.write_bytes(data)
         paths.append(dest)
     return register_paths(paths, style, references_dir)
+
+
+# Checked in order: "vox_wet"/"vox_dry" contain "vox", and "instrumental"
+# contains "mix"-like words in some exports, so the specific names go first.
+_STEM_HINTS = [
+    ("vox_wet", ("voxwet", "wet", "reverb", "verb", "delay", "fx_return", "returns")),
+    ("vox_dry", ("voxdry", "dry", "vocal", "vox", "lead")),
+    ("inst", ("inst", "instrumental", "backing", "music", "beat", "band")),
+    ("mix", ("mix", "master", "full", "bounce", "final")),
+]
+
+
+def guess_stem(filename: str) -> str | None:
+    """Best-guess which of the four stems a file is from its name, or None."""
+    from mixlens.io.stems import FILENAME_RE
+
+    name = Path(filename).name
+    m = FILENAME_RE.match(name if name.lower().endswith(".wav") else Path(name).stem + ".wav")
+    if m:
+        return m["stem"]
+    flat = re.sub(r"[\s\-.]+", "_", Path(name).stem.lower())
+    squashed = flat.replace("_", "")
+    for stem, hints in _STEM_HINTS:
+        if any(h in flat or h in squashed for h in hints):
+            return stem
+    return None
+
+
+def guess_song_version(filenames: list[str]) -> tuple[str, str] | None:
+    """If files follow `{song}__{version}__{stem}`, return (song, version)."""
+    from mixlens.io.stems import FILENAME_RE
+
+    for f in filenames:
+        m = FILENAME_RE.match(Path(f).stem + ".wav")
+        if m:
+            return m["song"], m["version"]
+    return None
+
+
+def assign_stems(filenames: list[str]) -> dict[str, str | None]:
+    """Map filename -> stem guess, dropping duplicate guesses (first wins) so
+    two files never claim the same slot."""
+    taken: set[str] = set()
+    out: dict[str, str | None] = {}
+    for f in filenames:
+        g = guess_stem(f)
+        if g in taken:
+            g = None
+        if g:
+            taken.add(g)
+        out[f] = g
+    return out

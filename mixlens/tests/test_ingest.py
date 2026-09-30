@@ -47,3 +47,25 @@ def test_references_saved_registered_and_editable(tmp_path):
     update_reference_meta(tmp_path, "dream/a.wav", "Artist", "Title", "deep verb")
     row = [e for e in load_references_yaml(tmp_path) if e.path == "dream/a.wav"][0]
     assert (row.artist, row.note) == ("Artist", "deep verb")
+
+
+def test_guess_stem_from_common_export_names():
+    from mixlens.io.ingest import assign_stems, guess_song_version, guess_stem
+
+    assert guess_stem("neon_altar__v3__vox_dry.wav") == "vox_dry"
+    assert guess_stem("Neon Altar - Vocal Dry.wav") == "vox_dry"
+    assert guess_stem("Neon Altar - Vox Wet (Reverb Returns).wav") == "vox_wet"
+    assert guess_stem("neon_altar_instrumental.flac") == "inst"
+    assert guess_stem("Neon Altar FINAL MASTER.wav") == "mix"
+    assert guess_stem("bounce123.wav") == "mix"
+    assert guess_stem("untitled.wav") is None
+    assert guess_song_version(["neon_altar__v3__mix.wav"]) == ("neon_altar", "v3")
+
+
+def test_assign_stems_never_double_books_a_slot():
+    from mixlens.io.ingest import assign_stems
+
+    got = assign_stems(["a_vox_dry.wav", "b_vocal.wav", "c_inst.wav"])
+    assert got["a_vox_dry.wav"] == "vox_dry"
+    assert got["b_vocal.wav"] is None
+    assert got["c_inst.wav"] == "inst"

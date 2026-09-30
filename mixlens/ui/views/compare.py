@@ -19,10 +19,15 @@ def render(repo, cfg) -> None:
         st.info("No analyzed versions yet. Use the Analyze page to run one.")
         return
 
+    target = st.session_state.get("compare_target")
     songs = sorted(versions_df["song_id"].unique())
-    song = st.selectbox("Song", songs)
+    song = st.selectbox("Song", songs, index=songs.index(target[0]) if target and target[0] in songs else 0)
     song_versions = versions_df[versions_df["song_id"] == song]
-    version = st.selectbox("Version", sorted(song_versions["version"].unique()))
+    version_opts = sorted(song_versions["version"].unique())
+    version = st.selectbox(
+        "Version", version_opts,
+        index=version_opts.index(target[1]) if target and target[0] == song and target[1] in version_opts else 0,
+    )
     version_id = int(song_versions[song_versions["version"] == version].iloc[0]["version_id"])
 
     with repo.cursor() as cur:

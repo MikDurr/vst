@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from mixlens.checks.peaks import CheckResult, any_fail
-from mixlens.io.ingest import AUDIO_TYPES, save_sections, save_stems
+from mixlens.io.ingest import AUDIO_TYPES, assign_stems, guess_song_version, save_sections, save_stems
 from mixlens.io.sidecar import load_song_yaml
 from mixlens.io.stems import STEM_NAMES
 from mixlens.pipeline import analyze_version, run_checks_only
@@ -34,7 +34,7 @@ def render(repo, cfg, project_root: Path) -> None:
     st.header("Analyze")
 
     songs = _discover_songs(project_root)
-    _render_upload(repo, project_root, songs, expanded=not songs)
+    _render_upload(repo, cfg, project_root, songs, expanded=not songs)
     if not songs:
         return
 
@@ -91,12 +91,7 @@ def render(repo, cfg, project_root: Path) -> None:
                     if result.get("skipped"):
                         st.info(f"Skipped: {result['reason']} (stems unchanged since the last analysis; check 'Force' to redo it).")
                     else:
-                        st.success(
-                            f"Analyzed {result['song']} {result['version']}: "
-                            f"{result['n_checks']} checks, {result['n_features']} feature rows. "
-                            "See it on the Compare or History page."
-                        )
-                        st.rerun()
+                        _go_to_compare(song_name, version)
 
 
 def _render_check_results(results: list[CheckResult]) -> None:
@@ -118,44 +113,68 @@ def _render_check_results(results: list[CheckResult]) -> None:
         st.success("Peak safety: all checks pass.")
 
 
-STEM_HELP = {
-    "mix": "Full bounce, master chain ON",
-    "vox_dry": "Vocal bus with inline FX, sends muted, master bypassed",
-    "vox_wet": "Vocal reverb/delay returns only, master bypassed",
-    "inst": "Everything except vocals and vocal returns, master bypassed",
-}
+def _go_to_compare(song: str, version: str) -> None:
+    """Jump to the Compare page with this version selected."""
+    st.session_state["nav_target"] = "Compare"
+    st.session_state["compare_target"] = (song, version)
+    st.rerun()
 
 
-def _render_upload(repo, project_root: Path, songs: dict[str, Path], expanded: bool) -> None:
+def _render_upload(repo, cfg, project_root: Path, songs: dict[str, Path], expanded: bool) -> None:
     with st.expander("Upload a new mix version", expanded=expanded):
         st.caption(
-            "Export four bounces from your DAW (same length, all starting at bar 1) "
-            "and drop them in. Files are renamed and stored for you."
+            "Drop all four bounces at once (same length, all starting at bar 1): full mix with master on, "
+            "vocal dry, vocal reverb/delay returns only, and instrumental. Names like `vox_dry`, `wet`, "
+            "`inst`, `mix` are recognised; fix any wrong guess below."
         )
-        existing = ["(new song)"] + sorted(songs.keys())
-        choice = st.selectbox("Song", existing, key="up_song_choice")
+        files = st.file_uploader("Stems", type=AUDIO_TYPES, accept_multiple_files=True, key="up_files")
 
+        by_name = {f.name: f for f in files or []}
+        guesses = assign_stems(list(by_name))
+        parsed = guess_song_version(list(by_name))
+        if parsed and st.session_state.get("_up_parsed") != parsed:
+            st.session_state["_up_parsed"] = parsed
+            st.session_state["up_song_choice"] = parsed[0] if parsed[0] in songs else "(new song)"
+            st.session_state["up_song"] = parsed[0]
+            st.session_state["up_version"] = parsed[1]
+
+        slots = ["(ignore)"] + list(STEM_NAMES)
+        assignment: dict[str, str] = {}
+        if by_name:
+            st.markdown("**Which file is which**")
+            cols = st.columns(min(len(by_name), 4))
+            for i, name in enumerate(by_name):
+                g = guesses[name]
+                choice = cols[i % len(cols)].selectbox(
+                    name, slots, index=slots.index(g) if g else 0, key=f"up_assign_{name}"
+                )
+                if choice != "(ignore)":
+                    assignment[choice] = name
+
+        chosen = [n for n in by_name if n in assignment.values()]
+        dupes = len(chosen) != len(set(assignment.values())) or len(assignment) != len(chosen)
+        missing = [s for s in STEM_NAMES if s not in assignment]
+        if by_name:
+            if dupes:
+                st.error("Two files are assigned to the same slot.")
+            elif missing:
+                st.warning("Still need: " + ", ".join(missing))
+
+        choice = st.selectbox("Song", ["(new song)"] + sorted(songs), key="up_song_choice")
         defaults = {"style": "dream", "bpm": 120.0}
         if choice != "(new song)":
             info = load_song_yaml(songs[choice])
             defaults = {"style": info.style, "bpm": info.bpm}
 
         c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
-        song = c1.text_input("Song name", value="" if choice == "(new song)" else choice,
-                             disabled=choice != "(new song)", key="up_song")
-        version = c2.text_input("Version", value="v1", key="up_version")
+        song = c1.text_input("Song name", disabled=choice != "(new song)", key="up_song")
+        st.session_state.setdefault("up_version", "v1")
+        version = c2.text_input("Version", key="up_version")
         styles = ["dream", "hyperpop", "electroclash"]
-        style = c3.selectbox("Style", styles, index=styles.index(defaults["style"]) if defaults["style"] in styles else 0,
-                             key="up_style")
+        style = c3.selectbox(
+            "Style", styles, index=styles.index(defaults["style"]) if defaults["style"] in styles else 0, key="up_style"
+        )
         bpm = c4.number_input("BPM", min_value=40.0, max_value=260.0, value=float(defaults["bpm"]), key="up_bpm")
-
-        uploads = {}
-        cols = st.columns(2)
-        for i, stem in enumerate(STEM_NAMES):
-            with cols[i % 2]:
-                uploads[stem] = st.file_uploader(
-                    f"{stem}", type=AUDIO_TYPES, help=STEM_HELP[stem], key=f"up_{stem}"
-                )
 
         st.markdown("**Sections** (optional, in seconds -- enables per-section vocal level)")
         sections_df = st.data_editor(
@@ -163,13 +182,17 @@ def _render_upload(repo, project_root: Path, songs: dict[str, Path], expanded: b
             num_rows="dynamic", use_container_width=True, key="up_sections",
         )
 
-        ready = all(uploads.values())
         name = (choice if choice != "(new song)" else song).strip()
-        if st.button("Save stems", type="primary", disabled=not ready or not name):
+        ready = by_name and not dupes and not missing and bool(name)
+        col_a, col_b = st.columns(2)
+        save_only = col_a.button("Save stems", disabled=not ready, use_container_width=True)
+        one_click = col_b.button("Save & analyze", type="primary", disabled=not ready, use_container_width=True)
+
+        if save_only or one_click:
             try:
                 song_dir = save_stems(
                     project_root / "mixes", name, version, style, bpm,
-                    {stem: f.getvalue() for stem, f in uploads.items()},
+                    {stem: by_name[fname].getvalue() for stem, fname in assignment.items()},
                 )
                 secs = {
                     str(r["section"]): (r["start"], r["end"])
@@ -180,9 +203,16 @@ def _render_upload(repo, project_root: Path, songs: dict[str, Path], expanded: b
                     save_sections(song_dir, secs)
             except Exception as e:
                 st.error(f"Couldn't save: {e}")
-            else:
-                st.session_state["analyze_pending"] = (name, version.strip())
-                st.success(f"Saved {name} {version}. Pick it below and run the analysis.")
-                st.rerun()
-        elif not ready:
-            st.caption("Waiting on: " + ", ".join(s for s, f in uploads.items() if not f))
+                return
+            version = version.strip()
+            if one_click:
+                with st.spinner("Splitting with Demucs and extracting features -- a minute or two..."):
+                    try:
+                        result = analyze_version(song_dir, version, cfg, repo, project_root / ".cache", force=True)
+                    except Exception as e:
+                        st.error(f"Saved, but analysis failed: {e}")
+                        return
+                _go_to_compare(name, version)
+            st.session_state["analyze_pending"] = (name, version)
+            st.success(f"Saved {name} {version}. Pick it below and run the analysis.")
+            st.rerun()

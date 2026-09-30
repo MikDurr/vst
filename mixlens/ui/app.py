@@ -30,7 +30,13 @@ def get_config():
 
 def main() -> None:
     st.sidebar.title("MixLens")
-    page = st.sidebar.radio("Page", ["Analyze", "Compare", "History", "References", "Regret"])
+    pages = ["Analyze", "Compare", "History", "References", "Regret"]
+    # Other pages request navigation via nav_target; it has to be applied
+    # before the radio is created, since a widget's state can't change after.
+    target = st.session_state.pop("nav_target", None)
+    if target in pages:
+        st.session_state["page"] = target
+    page = st.sidebar.radio("Page", pages, key="page")
 
     repo = get_repo()
     cfg = get_config()
