@@ -13,6 +13,7 @@ class SongInfo:
     style: str
     bpm: float
     sections: dict[str, tuple[float, float]]
+    instrumental: bool = False
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ def load_song_yaml(directory: str | Path) -> SongInfo:
         style=data["style"],
         bpm=float(data["bpm"]),
         sections=sections,
+        instrumental=bool(data.get("instrumental", False)),
     )
 
 

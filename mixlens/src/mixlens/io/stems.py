@@ -19,13 +19,15 @@ class StemSet:
     version: str
     sr: int
     mix: np.ndarray
-    vox_dry: np.ndarray
-    vox_wet: np.ndarray
-    inst: np.ndarray
+    vox_dry: np.ndarray | None
+    vox_wet: np.ndarray | None
+    inst: np.ndarray | None
     paths: dict[str, Path]
 
     def as_dict(self) -> dict[str, np.ndarray]:
-        return {"mix": self.mix, "vox_dry": self.vox_dry, "vox_wet": self.vox_wet, "inst": self.inst}
+        """The stems that exist (an instrumental song only has `mix`, maybe `inst`)."""
+        all_stems = {"mix": self.mix, "vox_dry": self.vox_dry, "vox_wet": self.vox_wet, "inst": self.inst}
+        return {k: v for k, v in all_stems.items() if v is not None}
 
 
 def parse_stem_filename(path: Path) -> tuple[str, str, str]:
@@ -37,8 +39,16 @@ def parse_stem_filename(path: Path) -> tuple[str, str, str]:
     return m["song"], m["version"], m["stem"]
 
 
-def find_stem_set(directory: str | Path, version: str) -> dict[str, Path]:
-    """Locate the four stems for a given version inside `directory`."""
+INSTRUMENTAL_REQUIRED = ("mix",)
+
+
+def required_stems(instrumental: bool) -> tuple[str, ...]:
+    """An instrumental has no vocal stems; only the full mix is needed."""
+    return INSTRUMENTAL_REQUIRED if instrumental else STEM_NAMES
+
+
+def find_stem_set(directory: str | Path, version: str, required: tuple[str, ...] = STEM_NAMES) -> dict[str, Path]:
+    """Locate a version's stems inside `directory`; every name in `required` must exist."""
     directory = Path(directory)
     found: dict[str, Path] = {}
     for p in directory.glob("*.wav"):
@@ -48,7 +58,7 @@ def find_stem_set(directory: str | Path, version: str) -> dict[str, Path]:
             continue
         if ver == version:
             found[stem] = p
-    missing = [s for s in STEM_NAMES if s not in found]
+    missing = [s for s in required if s not in found]
     if missing:
         raise FileNotFoundError(
             f"Missing stems {missing} for version '{version}' in {directory}"
@@ -56,8 +66,10 @@ def find_stem_set(directory: str | Path, version: str) -> dict[str, Path]:
     return found
 
 
-def load_stem_set(directory: str | Path, version: str, target_sr: int = 44100) -> StemSet:
-    paths = find_stem_set(directory, version)
+def load_stem_set(
+    directory: str | Path, version: str, target_sr: int = 44100, instrumental: bool = False
+) -> StemSet:
+    paths = find_stem_set(directory, version, required=required_stems(instrumental))
     song, _ver, _stem = parse_stem_filename(next(iter(paths.values())))
     audio: dict[str, np.ndarray] = {}
     sr_used = target_sr
@@ -71,8 +83,8 @@ def load_stem_set(directory: str | Path, version: str, target_sr: int = 44100) -
         version=version,
         sr=sr_used,
         mix=audio["mix"],
-        vox_dry=audio["vox_dry"],
-        vox_wet=audio["vox_wet"],
-        inst=audio["inst"],
+        vox_dry=audio.get("vox_dry"),
+        vox_wet=audio.get("vox_wet"),
+        inst=audio.get("inst"),
         paths=paths,
     )

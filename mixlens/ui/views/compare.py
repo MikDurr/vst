@@ -7,6 +7,7 @@ import streamlit as st
 
 from mixlens.compare.deviation import evaluate
 from mixlens.compare.glossary import explain, feature_name, what_it_measures
+from mixlens.pipeline import INSTRUMENTAL_SUFFIX
 from mixlens.pipeline import build_hints
 
 from plots import csi_timeline_figure, ltas_vs_envelope_figure, space_sheen_scatter
@@ -23,6 +24,9 @@ def render(repo, cfg) -> None:
             "*ok* = inside the references' p10-p90 range; *watch* = moderately outside (z between 1.5 and 2.5, a hint only); "
             "*flag* = clearly outside (z above 2.5). z is how many 'typical spreads' you are from the reference median.\n"
             "- **Hints** are suggested fixes that trigger when specific measurements deviate together.\n"
+            "- **Instrumental songs** have no vocal, so only the whole-mix measurements apply (loudness, dynamics, "
+            "tonal balance, stereo width, top end, punch, pumping). You choose whether to compare against your references "
+            "with their vocals removed, or their full mix.\n"
             "- A flag is not an error. If your references don't share the sound you want, the flag is telling you about your "
             "references. The numbers only say how your mix differs from them."
         )
@@ -43,10 +47,9 @@ def render(repo, cfg) -> None:
     )
     version_id = int(song_versions[song_versions["version"] == version].iloc[0]["version_id"])
 
-    with repo.cursor() as cur:
-        cur.execute("SELECT style FROM songs WHERE song_id=?", (song,))
-        row = cur.fetchone()
-    style = row[0] if row else None
+    song_info = repo.get_song(song) or {}
+    style = song_info.get("style")
+    instrumental = bool(song_info.get("instrumental"))
 
     checks_df = repo.get_checks(version_id)
     _render_safety_banner(checks_df)
@@ -55,9 +58,36 @@ def render(repo, cfg) -> None:
         st.warning("Song has no known style; can't compare to an envelope.")
         return
 
-    envelopes = repo.get_envelopes(style)
+    env_style = style
+    if instrumental:
+        st.info(
+            "**Instrumental:** vocal measurements (vocal level, consonant clarity, reverb space, ducking) don't apply "
+            "and aren't shown. Only whole-mix measurements are compared."
+        )
+        basis = st.radio(
+            "Compare against",
+            ["References with vocals removed", "References' full mix"],
+            horizontal=True,
+            help="Most references have vocals, and a vocal sits in the midrange of their spectrum and loudness. "
+                 "'Vocals removed' measures each reference's Demucs accompaniment so you're compared like for like. "
+                 "Pick 'full mix' only if your references are themselves instrumentals.",
+        )
+        if basis == "References with vocals removed":
+            env_style = style + INSTRUMENTAL_SUFFIX
+            st.caption(
+                "Approximate: Demucs leaves a little vocal bleed in the accompaniment and slightly changes its "
+                "character, so treat small deviations as noise."
+            )
+
+    envelopes = repo.get_envelopes(env_style)
     if not envelopes:
-        st.warning(f"No envelopes built for style '{style}'. Use the References page to build them.")
+        if instrumental and env_style != style:
+            st.warning(
+                f"No vocals-removed envelope for style '{style}' yet. Use the References page to build envelopes "
+                "(references analyzed before instrumental mode need rebuilding)."
+            )
+        else:
+            st.warning(f"No envelopes built for style '{style}'. Use the References page to build them.")
         return
 
     features_df = repo.get_features(entity="version", entity_id=version_id)
@@ -122,6 +152,9 @@ def render(repo, cfg) -> None:
                     why.append(f"{feature_name(f)} = {raw[f]:.2f}")
             if why:
                 st.caption("Because: " + "; ".join(why))
+
+    if instrumental:
+        return
 
     st.subheader("Space vs sheen")
     st.caption(

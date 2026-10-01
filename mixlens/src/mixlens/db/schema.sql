@@ -3,7 +3,8 @@
 CREATE TABLE IF NOT EXISTS songs (
     song_id TEXT PRIMARY KEY,
     style TEXT,
-    bpm REAL
+    bpm REAL,
+    instrumental INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS versions (

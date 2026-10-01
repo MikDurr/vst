@@ -8,7 +8,9 @@ from mixlens.compare.glossary import feature_name, trend_note, what_it_measures
 
 from plots import history_line_figure
 
-TRACKED_FEATURES = ["vir_med", "csi", "space_contrast", "air_ratio", "true_peak"]
+TRACKED_VOCAL = ["vir_med", "csi", "space_contrast", "air_ratio", "true_peak"]
+# An instrumental has no vocal measurements; track the whole-mix ones instead.
+TRACKED_INSTRUMENTAL = ["lufs_i", "st_crest", "transient_ratio", "air_ratio", "true_peak"]
 
 
 def render(repo, cfg) -> None:
@@ -30,6 +32,10 @@ def render(repo, cfg) -> None:
     songs = sorted(versions_df["song_id"].unique())
     song = st.selectbox("Song", songs)
     song_versions = versions_df[versions_df["song_id"] == song].sort_values("version_id")
+    instrumental = bool((repo.get_song(song) or {}).get("instrumental"))
+    TRACKED_FEATURES = TRACKED_INSTRUMENTAL if instrumental else TRACKED_VOCAL
+    if instrumental:
+        st.caption("Instrumental song: tracking whole-mix measurements (no vocal measurements apply).")
 
     rows = []
     for _idx, v in song_versions.iterrows():

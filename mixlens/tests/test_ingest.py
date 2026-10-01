@@ -138,3 +138,11 @@ def test_derive_wet_rejects_gross_offset():
     dry, wet = _synth()
     with pytest.raises(ValueError, match="offset"):
         derive_wet(_stereo_wav(np.roll(dry + wet, 30000, axis=0)), _stereo_wav(dry))
+
+
+def test_save_stems_instrumental_needs_only_mix(tmp_path):
+    d = save_stems(tmp_path, "beat", "v1", "dream", 128, {"mix": _wav_bytes()}, instrumental=True)
+    assert [p.name for p in d.glob("*.wav")] == ["beat__v1__mix.wav"]
+    assert yaml.safe_load((d / "song.yaml").read_text())["instrumental"] is True
+    with pytest.raises(ValueError):  # a normal song still requires all four
+        save_stems(tmp_path, "vox", "v1", "dream", 128, {"mix": _wav_bytes()})

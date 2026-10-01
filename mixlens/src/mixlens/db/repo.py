@@ -32,6 +32,10 @@ class Repo:
 
     def _init_schema(self) -> None:
         self._conn.executescript(SCHEMA_PATH.read_text())
+        # Databases created before instrumental mode lack this column.
+        cols = {row[1] for row in self._conn.execute("PRAGMA table_info(songs)")}
+        if "instrumental" not in cols:
+            self._conn.execute("ALTER TABLE songs ADD COLUMN instrumental INTEGER DEFAULT 0")
         self._conn.commit()
 
     @contextmanager
@@ -53,13 +57,22 @@ class Repo:
 
     # -- songs / versions -----------------------------------------------
 
-    def upsert_song(self, song_id: str, style: str, bpm: float) -> None:
+    def upsert_song(self, song_id: str, style: str, bpm: float, instrumental: bool = False) -> None:
         with self.cursor() as cur:
             cur.execute(
-                "INSERT INTO songs (song_id, style, bpm) VALUES (?, ?, ?) "
-                "ON CONFLICT(song_id) DO UPDATE SET style=excluded.style, bpm=excluded.bpm",
-                (song_id, style, bpm),
+                "INSERT INTO songs (song_id, style, bpm, instrumental) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(song_id) DO UPDATE SET style=excluded.style, bpm=excluded.bpm, "
+                "instrumental=excluded.instrumental",
+                (song_id, style, bpm, int(instrumental)),
             )
+
+    def get_song(self, song_id: str) -> dict | None:
+        with self.cursor() as cur:
+            cur.execute("SELECT style, bpm, instrumental FROM songs WHERE song_id=?", (song_id,))
+            row = cur.fetchone()
+        if not row:
+            return None
+        return {"style": row[0], "bpm": row[1], "instrumental": bool(row[2])}
 
     def upsert_version(self, song_id: str, version: str, stem_hash: str, config_hash: str) -> int:
         now = datetime.now(timezone.utc).isoformat()

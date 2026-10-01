@@ -15,7 +15,10 @@ from mixlens.compare.regret import compare_groups
 from mixlens.config import load_config
 from mixlens.db.repo import Repo
 from mixlens.io.sidecar import load_references_yaml, register_references
-from mixlens.pipeline import analyze_reference, analyze_version, build_hints, run_checks_only, score_version_against_envelopes
+from mixlens.pipeline import (
+    INSTRUMENTAL_SUFFIX, analyze_reference, analyze_version, build_hints, build_style_envelopes, run_checks_only,
+    score_version_against_envelopes,
+)
 
 app = typer.Typer(add_completion=False, help="MixLens: measure your mix against reference tracks.")
 ref_app = typer.Typer(help="Manage reference tracks and style envelopes.")
@@ -73,12 +76,10 @@ def ref_build_envelopes():
         result = analyze_reference(entry, _references_dir(), cfg, repo, PROJECT_ROOT / ".cache")
         console.print(f"Analyzed {result['path']} ({result['style']}): {result['n_features']} feature rows")
 
-    styles = sorted({e.style for e in entries})
-    for style in styles:
-        df = repo.get_features_for_style(style, entity="ref")
-        envelopes = build_envelopes(df)
-        repo.replace_envelopes(style, envelopes)
-        console.print(f"Built {len(envelopes)} envelope entries for style '{style}'")
+    for style in sorted({e.style for e in entries}):
+        for key, n in build_style_envelopes(repo, style).items():
+            label = "instrumental (vocals removed)" if key.endswith(INSTRUMENTAL_SUFFIX) else "full mix"
+            console.print(f"Built {n} envelope entries for style '{style}' [{label}]")
 
 
 @ref_app.command("audit")
@@ -140,7 +141,14 @@ def analyze(mix_dir: str = typer.Argument(...), version: str = typer.Option(...,
 
 
 @app.command()
-def report(song: str = typer.Argument(...), version: str = typer.Argument(...)):
+def report(
+    song: str = typer.Argument(...),
+    version: str = typer.Argument(...),
+    refs_full_mix: bool = typer.Option(
+        False, "--refs-full-mix",
+        help="Instrumental songs only: compare against the references' full mix instead of their vocals-removed accompaniment.",
+    ),
+):
     """Safety table, flag table, hints for one analyzed version."""
     cfg = load_config(_config_path_option())
     repo = Repo(_db_path())
@@ -159,8 +167,20 @@ def report(song: str = typer.Argument(...), version: str = typer.Argument(...)):
         console.print("[yellow]Unknown style; skipping envelope comparison.[/yellow]")
         return
 
-    results = score_version_against_envelopes(repo, version_id, songs_df_style, cfg)
-    table = Table(title=f"Deviation: {song} {version} vs style '{songs_df_style}'")
+    info = repo.get_song(song) or {}
+    env_style = songs_df_style
+    if info.get("instrumental") and not refs_full_mix:
+        env_style = songs_df_style + INSTRUMENTAL_SUFFIX
+        console.print(
+            "[dim]Instrumental: only whole-mix measurements apply, compared against the references' "
+            "vocals-removed accompaniment (approximate: Demucs leaves a little vocal bleed).[/dim]"
+        )
+        if not repo.get_envelopes(env_style):
+            console.print("[yellow]No accompaniment envelope yet: run `mixlens ref build-envelopes` again.[/yellow]")
+            return
+
+    results = score_version_against_envelopes(repo, version_id, env_style, cfg)
+    table = Table(title=f"Deviation: {song} {version} vs '{env_style}'")
     table.add_column("feature")
     table.add_column("band")
     table.add_column("value")

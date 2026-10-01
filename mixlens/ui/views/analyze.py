@@ -51,7 +51,9 @@ def render(repo, cfg, project_root: Path) -> None:
     except Exception as e:
         st.error(f"Couldn't read song.yaml: {e}")
         return
-    st.caption(f"style: **{song_info.style}** · bpm: **{song_info.bpm}**")
+    st.caption(
+        f"style: **{song_info.style}** · bpm: **{song_info.bpm}**" + (" · **instrumental**" if song_info.instrumental else "")
+    )
 
     versions = _discover_versions(song_dir)
     if not versions:
@@ -123,6 +125,9 @@ STEMS_HELP = """\
 | `vox_wet` | **Only** the vocal reverb/delay returns, no dry vocal in it |
 | `inst` | Everything except vocals and the vocal returns, keeping its own processing |
 
+**Instrumental song?** Tick "This song is an instrumental" and you only need `mix` (`inst` is optional). The vocal
+measurements are skipped and the song is compared against your references with their vocals removed.
+
 All four: same length, same start point (bar 1). The master chain is **bypassed on every stem except `mix`**.
 
 **Why split it:** dry + wet lets MixLens judge your reverb separately (how wet it is, whether it ducks, whether it
@@ -132,6 +137,8 @@ washes out consonants). Bypassing the master keeps the limiter from smearing tho
 LOGIC_HELP = """\
 Logic has no "export a stem" button for this: you mute things and do a normal bounce, four times. Menu names are for
 Logic Pro X / 10.x; always **listen to each bounce** before uploading.
+
+**Instrumental song:** just bounce `mix` (master chain on) and tick "This song is an instrumental". Nothing else needed.
 
 **Set up once**
 1. Set the cycle range from bar 1 to the end of the song. Use the **same range for all four bounces**, so the files
@@ -180,7 +187,8 @@ def _render_upload(repo, cfg, project_root: Path, songs: dict[str, Path], expand
         st.caption(
             "Drop all four bounces at once (same length, all starting at bar 1): full mix with master on, "
             "vocal dry, vocal reverb/delay returns only, and instrumental. Names like `vox_dry`, `wet`, "
-            "`inst`, `mix` are recognised; fix any wrong guess below."
+            "`inst`, `mix` are recognised; fix any wrong guess below. For an instrumental song, tick the "
+            "instrumental box and drop just the mix."
         )
         with st.expander("What are the four stems?"):
             st.markdown(STEMS_HELP)
@@ -199,23 +207,56 @@ def _render_upload(repo, cfg, project_root: Path, songs: dict[str, Path], expand
             st.session_state["up_song"] = parsed[0]
             st.session_state["up_version"] = parsed[1]
 
-        slots = ["(ignore)"] + list(STEM_NAMES) + ["vox_full"]
+        choice = st.selectbox("Song", ["(new song)"] + sorted(songs), key="up_song_choice")
+        info = load_song_yaml(songs[choice]) if choice != "(new song)" else None
+        defaults = {"style": info.style, "bpm": info.bpm} if info else {"style": "dream", "bpm": 120.0}
+
+        # The instrumental flag follows the chosen song until you change it yourself.
+        if st.session_state.get("_up_last_song") != choice:
+            st.session_state["_up_last_song"] = choice
+            st.session_state["up_instrumental"] = bool(info.instrumental) if info else False
+        instrumental = st.checkbox(
+            "This song is an instrumental (no vocals)", key="up_instrumental",
+            help="Only `mix` is required. Vocal measurements are skipped and the song is compared against "
+                 "your references with their vocals removed.",
+        )
+        if instrumental:
+            st.info(
+                "Instrumental mode: only the full mix is needed. Vocal measurements (vocal level, consonant "
+                "clarity, reverb space, ducking) are skipped. Compare will use your references with their "
+                "vocals removed by Demucs, which is approximate (a little vocal bleed remains)."
+            )
+            guesses = {n: (g if g in ("mix", "inst") else None) for n, g in guesses.items()}
+            if "mix" not in guesses.values():
+                # `mix` is the one required file: a lone upload is the mix whatever its name
+                # suggests ("beat" reads like "inst"), else the first file we couldn't place.
+                if len(guesses) == 1:
+                    guesses = {n: "mix" for n in guesses}
+                else:
+                    for n, g in guesses.items():
+                        if g is None:
+                            guesses[n] = "mix"
+                            break
+
+        slots = ["(ignore)", "mix", "inst"] if instrumental else ["(ignore)"] + list(STEM_NAMES) + ["vox_full"]
         assignment: dict[str, str] = {}
         if by_name:
             st.markdown("**Which file is which**")
             cols = st.columns(min(len(by_name), 4))
             for i, name in enumerate(by_name):
                 g = guesses[name]
-                choice = cols[i % len(cols)].selectbox(
-                    name, slots, index=slots.index(g) if g else 0, key=f"up_assign_{name}"
+                picked = cols[i % len(cols)].selectbox(
+                    name, slots, index=slots.index(g) if g in slots else 0,
+                    key=f"up_assign_{name}_{int(instrumental)}",
                 )
-                if choice != "(ignore)":
-                    assignment[choice] = name
+                if picked != "(ignore)":
+                    assignment[picked] = name
 
         chosen = [n for n in by_name if n in assignment.values()]
         dupes = len(chosen) != len(set(assignment.values())) or len(assignment) != len(chosen)
-        derive = "vox_wet" not in assignment and "vox_full" in assignment
-        missing = [s for s in STEM_NAMES if s not in assignment and not (s == "vox_wet" and derive)]
+        derive = not instrumental and "vox_wet" not in assignment and "vox_full" in assignment
+        needed = ("mix",) if instrumental else STEM_NAMES
+        missing = [s for s in needed if s not in assignment and not (s == "vox_wet" and derive)]
         if by_name:
             if derive:
                 st.info("No vox_wet given: it will be derived as vox_full minus vox_dry. Both bounces must start at the same point.")
@@ -223,12 +264,6 @@ def _render_upload(repo, cfg, project_root: Path, songs: dict[str, Path], expand
                 st.error("Two files are assigned to the same slot.")
             elif missing:
                 st.warning("Still need: " + ", ".join(missing))
-
-        choice = st.selectbox("Song", ["(new song)"] + sorted(songs), key="up_song_choice")
-        defaults = {"style": "dream", "bpm": 120.0}
-        if choice != "(new song)":
-            info = load_song_yaml(songs[choice])
-            defaults = {"style": info.style, "bpm": info.bpm}
 
         c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
         song = c1.text_input("Song name", disabled=choice != "(new song)", key="up_song")
@@ -240,11 +275,13 @@ def _render_upload(repo, cfg, project_root: Path, songs: dict[str, Path], expand
         )
         bpm = c4.number_input("BPM", min_value=40.0, max_value=260.0, value=float(defaults["bpm"]), key="up_bpm")
 
-        st.markdown("**Sections** (optional, in seconds -- enables per-section vocal level)")
-        sections_df = st.data_editor(
-            pd.DataFrame({"section": ["verse1", "hook1"], "start": [0.0, 0.0], "end": [0.0, 0.0]}),
-            num_rows="dynamic", use_container_width=True, key="up_sections",
-        )
+        sections_df = None
+        if not instrumental:
+            st.markdown("**Sections** (optional, in seconds -- enables per-section vocal level)")
+            sections_df = st.data_editor(
+                pd.DataFrame({"section": ["verse1", "hook1"], "start": [0.0, 0.0], "end": [0.0, 0.0]}),
+                num_rows="dynamic", use_container_width=True, key="up_sections",
+            )
 
         name = (choice if choice != "(new song)" else song).strip()
         ready = by_name and not dupes and not missing and bool(name)
@@ -262,11 +299,11 @@ def _render_upload(repo, cfg, project_root: Path, songs: dict[str, Path], expand
                     stem_bytes["vox_wet"], derive_warnings = derive_wet(
                         by_name[assignment["vox_full"]].getvalue(), stem_bytes["vox_dry"]
                     )
-                song_dir = save_stems(project_root / "mixes", name, version, style, bpm, stem_bytes)
+                song_dir = save_stems(project_root / "mixes", name, version, style, bpm, stem_bytes, instrumental=instrumental)
                 if derive_warnings:
                     st.session_state["derive_warnings"] = derive_warnings
                     one_click = False  # don't auto-analyze a derived stem that looks suspect
-                secs = {
+                secs = {} if sections_df is None else {
                     str(r["section"]): (r["start"], r["end"])
                     for _, r in sections_df.iterrows()
                     if r["section"] and r["end"] > r["start"]
@@ -278,7 +315,7 @@ def _render_upload(repo, cfg, project_root: Path, songs: dict[str, Path], expand
                 return
             version = version.strip()
             if one_click:
-                with st.spinner("Splitting with Demucs and extracting features -- a minute or two..."):
+                with st.spinner("Extracting features..." if instrumental else "Splitting with Demucs and extracting features -- a minute or two..."):
                     try:
                         result = analyze_version(song_dir, version, cfg, repo, project_root / ".cache", force=True)
                     except Exception as e:

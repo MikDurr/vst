@@ -9,10 +9,10 @@ import plotly.express as px
 import streamlit as st
 
 from mixlens.compare.deviation import classify_level
-from mixlens.compare.envelope import build_envelopes, leave_one_out_audit
+from mixlens.compare.envelope import leave_one_out_audit
 from mixlens.io.ingest import AUDIO_TYPES, save_references
 from mixlens.io.sidecar import load_references_yaml, update_reference_meta
-from mixlens.pipeline import analyze_reference
+from mixlens.pipeline import INSTRUMENTAL_SUFFIX, analyze_reference, build_style_envelopes
 
 KNOWN_STYLES = ["dream", "hyperpop", "electroclash"]
 
@@ -101,7 +101,9 @@ def _render_build_envelopes(repo, cfg, references_dir: Path, style: str, style_e
     with st.expander("Build envelopes", expanded=False):
         st.caption(
             f"Analyzes every '{style}' reference not yet in the database (splits "
-            "with Demucs), then rebuilds the style envelope used by the Compare page."
+            "with Demucs), then rebuilds the style envelope used by the Compare page. It also measures each "
+            "reference with its vocals removed (the Demucs accompaniment), which is what an *instrumental* song "
+            "is compared against."
         )
         if st.button(f"Build envelopes for '{style}'", type="primary"):
             progress = st.progress(0.0, text="Starting...")
@@ -114,13 +116,12 @@ def _render_build_envelopes(repo, cfg, references_dir: Path, style: str, style_e
                     errors.append(f"{entry.path}: {e}")
             progress.progress(1.0, text="Building envelope...")
 
-            df = repo.get_features_for_style(style, entity="ref")
-            if df.empty:
+            built = build_style_envelopes(repo, style)
+            if not built:
                 st.error("No features were extracted -- nothing to build an envelope from.")
-            else:
-                envelopes = build_envelopes(df)
-                repo.replace_envelopes(style, envelopes)
-                st.success(f"Built {len(envelopes)} envelope entries for '{style}'.")
+            for key, n in built.items():
+                label = "vocals removed (for instrumentals)" if key.endswith(INSTRUMENTAL_SUFFIX) else "full mix"
+                st.success(f"Built {n} envelope entries for '{style}' [{label}].")
 
             for msg in errors:
                 st.error(f"Failed: {msg}")

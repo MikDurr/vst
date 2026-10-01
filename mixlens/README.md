@@ -56,6 +56,20 @@ Reference tracks (12-20 per style, full songs, untouched) go under
 `references/{style}/` and get registered in `references/references.yaml` —
 see `mixlens ref add`.
 
+## Instrumental songs
+
+Tick **"This song is an instrumental"** when uploading (or set `instrumental: true` in `song.yaml`). Then:
+
+- Only `mix` is required. Nothing is split with Demucs, and the vocal measurements (vocal level, consonant
+  clarity, reverb space, ducking, wet/dry) are skipped, leaving the whole-mix ones: loudness, dynamics, tonal
+  balance, stereo width, top end, punch, pumping.
+- Every reference is also measured on its Demucs **accompaniment** (vocals removed), filed under the style key
+  `<style>::instrumental`. Compare uses that set by default, so an instrumental is judged against references
+  without a vocal sitting in their midrange. It is approximate (Demucs leaves a little vocal bleed); pick
+  "References' full mix" instead if your references are themselves instrumentals.
+- CLI: `mixlens report <song> <version>` does the same; add `--refs-full-mix` for the full-mix basis.
+- Re-run **Build envelopes** once after upgrading so existing references get their accompaniment measurements.
+
 ## Usage
 
 Everything below has a UI equivalent (`mixlens ui`) — see the next section.

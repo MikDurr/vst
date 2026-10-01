@@ -30,25 +30,27 @@ def _to_wav24(data: bytes, dest: Path) -> None:
 
 
 def save_stems(
-    mixes_dir: Path, song: str, version: str, style: str, bpm: float, stems: dict[str, bytes]
+    mixes_dir: Path, song: str, version: str, style: str, bpm: float, stems: dict[str, bytes],
+    instrumental: bool = False,
 ) -> Path:
-    """Write the four stems as `{song}__{version}__{stem}.wav` (normalised to
-    24-bit WAV) and create/update `song.yaml`. Existing sections are kept."""
+    """Write the stems as `{song}__{version}__{stem}.wav` (normalised to 24-bit
+    WAV) and create/update `song.yaml`. Existing sections are kept. An
+    instrumental only needs `mix`; any other stems given are saved too."""
     song = validate_name("Song", song)
     version = validate_name("Version", version)
-    missing = [s for s in STEM_NAMES if s not in stems]
+    missing = [s for s in (("mix",) if instrumental else STEM_NAMES) if s not in stems]
     if missing:
         raise ValueError(f"Missing stems: {', '.join(missing)}")
 
     song_dir = mixes_dir / song
     song_dir.mkdir(parents=True, exist_ok=True)
-    for stem in STEM_NAMES:
+    for stem in (s for s in STEM_NAMES if s in stems):
         _to_wav24(stems[stem], song_dir / f"{song}__{version}__{stem}.wav")
 
     yaml_path = song_dir / "song.yaml"
     existing = yaml.safe_load(yaml_path.read_text()) if yaml_path.exists() else {}
     existing = existing or {}
-    existing.update({"song": song, "style": style, "bpm": float(bpm)})
+    existing.update({"song": song, "style": style, "bpm": float(bpm), "instrumental": bool(instrumental)})
     existing.setdefault("sections", {})
     yaml_path.write_text(yaml.dump(existing, sort_keys=False))
     return song_dir

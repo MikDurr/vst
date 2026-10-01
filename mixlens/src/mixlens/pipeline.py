@@ -9,14 +9,21 @@ from mixlens.checks.peaks import flat_top_ratio, run_peak_checks
 from mixlens.compare.deviation import DeviationResult, evaluate, match_hints
 from mixlens.config import Config
 from mixlens.db.repo import Repo
-from mixlens.features.registry import extract_all, extract_whole_mix, extract_vocal_inst_pair
+from mixlens.features.registry import extract_all, extract_vocal_inst_pair, extract_whole_mix
 from mixlens.io.loader import audio_hash, load_wav, stems_hash
 from mixlens.io.separate import separate_array
 from mixlens.io.sidecar import RefEntry, SongInfo, load_song_yaml
-from mixlens.io.stems import StemSet, load_stem_set
+from mixlens.io.stems import StemSet, find_stem_set, load_stem_set, required_stems
 from mixlens.types import FeatureRow
 
 DEMUCS_CACHE_DIRNAME = ".demucs_cache"
+
+# Reference tracks usually have vocals. To compare an instrumental against them
+# fairly, each reference also gets a derived row measured on its Demucs
+# accompaniment (vocals removed), filed under this style suffix so the existing
+# per-style envelope machinery works on it unchanged.
+INSTRUMENTAL_SUFFIX = "::instrumental"
+ACCOMPANIMENT_TAG = "#accompaniment"
 
 
 def _demucs_split(mix: np.ndarray, sr: int, cache_dir: Path, tag: str) -> tuple[np.ndarray, np.ndarray]:
@@ -27,11 +34,9 @@ def _demucs_split(mix: np.ndarray, sr: int, cache_dir: Path, tag: str) -> tuple[
 
 def run_checks_only(mix_dir: str | Path, version: str, cfg: Config) -> tuple[list, SongInfo]:
     """`mixlens check`: peak safety only, fast -- no Demucs, no feature extraction."""
-    from mixlens.io.stems import find_stem_set
-
     mix_dir = Path(mix_dir)
     song = load_song_yaml(mix_dir)
-    paths = find_stem_set(mix_dir, version)
+    paths = find_stem_set(mix_dir, version, required=required_stems(song.instrumental))
     mix, sr = load_wav(paths["mix"], target_sr=cfg.sample_rate)
     results = run_peak_checks(mix, sr, cfg, song.bpm)
     return results, song
@@ -51,25 +56,29 @@ def analyze_version(
     mix_dir = Path(mix_dir)
     cache_root = Path(cache_root)
     song = load_song_yaml(mix_dir)
-    stems = load_stem_set(mix_dir, version, target_sr=cfg.sample_rate)
+    stems = load_stem_set(mix_dir, version, target_sr=cfg.sample_rate, instrumental=song.instrumental)
 
     current_hash = stems_hash(stems.paths)
     stored_hash = repo.get_version_stem_hash(song.song, version)
     if not force and stored_hash == current_hash:
         return {"skipped": True, "reason": "unchanged stems", "song": song.song, "version": version}
 
-    repo.upsert_song(song.song, song.style, song.bpm)
+    repo.upsert_song(song.song, song.style, song.bpm, instrumental=song.instrumental)
     version_id = repo.upsert_version(song.song, version, current_hash, cfg.text_hash)
 
     check_results = run_peak_checks(mix=stems.mix, sr=stems.sr, cfg=cfg, bpm=song.bpm, extra_stems=stems.as_dict())
     repo.insert_checks(version_id, check_results)
 
-    demucs_cache = cache_root / DEMUCS_CACHE_DIRNAME
-    vocal_demucs, inst_demucs = _demucs_split(stems.mix, stems.sr, demucs_cache, f"{song.song}__{version}__mix")
-
-    feature_rows = extract_all(
-        stems, cfg, vocal_demucs=vocal_demucs, inst_demucs=inst_demucs, sections=song.sections
-    )
+    if song.instrumental:
+        # No vocal anywhere: only whole-mix measurements apply, and there's
+        # nothing for Demucs to separate.
+        feature_rows = extract_whole_mix(stems.mix, stems.sr, cfg)
+    else:
+        demucs_cache = cache_root / DEMUCS_CACHE_DIRNAME
+        vocal_demucs, inst_demucs = _demucs_split(stems.mix, stems.sr, demucs_cache, f"{song.song}__{version}__mix")
+        feature_rows = extract_all(
+            stems, cfg, vocal_demucs=vocal_demucs, inst_demucs=inst_demucs, sections=song.sections
+        )
     flat_top = flat_top_ratio(stems.mix, cfg)
     feature_rows = feature_rows + [FeatureRow(feature="flat_top_ratio", value=flat_top)]
 
@@ -102,9 +111,31 @@ def analyze_reference(ref: RefEntry, references_dir: str | Path, cfg: Config, re
 
     rows = extract_whole_mix(mix, sr, cfg)
     rows += extract_vocal_inst_pair(vocal, inst, sr, cfg, include_translation=False)
-
     repo.insert_features("ref", ref_id, rows)
+
+    # Same whole-mix measurements on the vocals-removed accompaniment, for
+    # comparing instrumentals against this reference.
+    acc_id = repo.upsert_ref(
+        ref.path + ACCOMPANIMENT_TAG, ref.style + INSTRUMENTAL_SUFFIX, ref.artist, ref.title, h, ref.note
+    )
+    repo.insert_features("ref", acc_id, extract_whole_mix(inst, sr, cfg))
     return {"ref_id": ref_id, "path": ref.path, "style": ref.style, "n_features": len(rows)}
+
+
+def build_style_envelopes(repo: Repo, style: str) -> dict[str, int]:
+    """(Re)build the envelope for `style` and its accompaniment variant.
+    Returns {envelope style key: number of entries} for whatever got built."""
+    from mixlens.compare.envelope import build_envelopes
+
+    built: dict[str, int] = {}
+    for key in (style, style + INSTRUMENTAL_SUFFIX):
+        df = repo.get_features_for_style(key, entity="ref")
+        if df.empty:
+            continue
+        envelopes = build_envelopes(df)
+        repo.replace_envelopes(key, envelopes)
+        built[key] = len(envelopes)
+    return built
 
 
 def score_version_against_envelopes(
