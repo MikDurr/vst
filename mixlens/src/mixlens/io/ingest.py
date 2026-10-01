@@ -56,10 +56,16 @@ def save_stems(
     return song_dir
 
 
-def save_sections(song_dir: Path, sections: dict[str, tuple[float, float]]) -> None:
+def save_sections(song_dir: Path, bars: dict[str, tuple[int, int]]) -> None:
+    """Store sections given as first/last bar. The analysis works in seconds, so
+    both are written (seconds computed from the song's BPM)."""
+    from mixlens.io.sidecar import seconds_from_bars
+
     yaml_path = song_dir / "song.yaml"
     data = yaml.safe_load(yaml_path.read_text()) or {}
-    data["sections"] = {k: [float(a), float(b)] for k, (a, b) in sections.items()}
+    bpm = float(data.get("bpm", 120))
+    data["section_bars"] = {k: [int(a), int(b)] for k, (a, b) in bars.items()}
+    data["sections"] = {k: [round(s, 3) for s in seconds_from_bars(int(a), int(b), bpm)] for k, (a, b) in bars.items()}
     yaml_path.write_text(yaml.dump(data, sort_keys=False))
 
 

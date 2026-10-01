@@ -1,7 +1,7 @@
 """Parse song.yaml and references/references.yaml sidecar files."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -14,6 +14,7 @@ class SongInfo:
     bpm: float
     sections: dict[str, tuple[float, float]]
     instrumental: bool = False
+    section_bars: dict[str, tuple[int, int]] = field(default_factory=dict)  # as typed: first and last bar, from 1
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,7 @@ def load_song_yaml(directory: str | Path) -> SongInfo:
         bpm=float(data["bpm"]),
         sections=sections,
         instrumental=bool(data.get("instrumental", False)),
+        section_bars={n: (int(r[0]), int(r[1])) for n, r in (data.get("section_bars") or {}).items()},
     )
 
 
@@ -58,6 +60,13 @@ def load_references_yaml(references_dir: str | Path) -> list[RefEntry]:
             )
         )
     return entries
+
+
+def seconds_from_bars(first_bar: int, last_bar: int, bpm: float) -> tuple[float, float]:
+    """Bars as shown in Logic's ruler (counted from 1, 4/4) -> (start, end) in seconds.
+    `last_bar` is inclusive, so a section running bars 9 to 24 ends where bar 25 begins."""
+    bar = 240.0 / bpm
+    return (first_bar - 1) * bar, last_bar * bar
 
 
 def bar_from_seconds(t_sec: float, bpm: float) -> float:

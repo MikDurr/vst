@@ -146,3 +146,16 @@ def test_save_stems_instrumental_needs_only_mix(tmp_path):
     assert yaml.safe_load((d / "song.yaml").read_text())["instrumental"] is True
     with pytest.raises(ValueError):  # a normal song still requires all four
         save_stems(tmp_path, "vox", "v1", "dream", 128, {"mix": _wav_bytes()})
+
+
+def test_sections_are_entered_in_bars_and_stored_as_seconds_too(tmp_path):
+    from mixlens.io.ingest import save_sections
+    from mixlens.io.sidecar import load_song_yaml, seconds_from_bars
+
+    assert seconds_from_bars(1, 8, 120) == (0.0, 16.0)        # 8 bars of 4/4 at 120 BPM = 16 s
+    assert seconds_from_bars(9, 24, 120) == (16.0, 48.0)      # last bar is inclusive
+    d = save_stems(tmp_path, "s", "v1", "dream", 120, {"mix": _wav_bytes()}, instrumental=True)
+    save_sections(d, {"verse": (9, 24), "hook": (25, 32)})
+    info = load_song_yaml(d)
+    assert info.section_bars == {"verse": (9, 24), "hook": (25, 32)}
+    assert info.sections["verse"] == (16.0, 48.0) and info.sections["hook"] == (48.0, 64.0)

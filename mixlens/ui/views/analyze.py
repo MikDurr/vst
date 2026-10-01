@@ -258,10 +258,17 @@ def _render_add(repo, cfg, project_root: Path, songs: dict[str, Path]) -> None:
     sections_df = None
     if not instrumental:
         with st.expander("Song sections (optional)"):
-            st.caption("Start/end seconds of each section. Adds a per-section vocal level.")
+            st.caption("Where each section starts and ends, in bars as shown in Logic's ruler (counting from bar 1, 4/4). "
+                       "Adds a vocal level for each section, e.g. verse 9 to 24. Add a row per section.")
+            known = load_song_yaml(songs[name]).section_bars if existing and name in songs else {}
+            start = pd.DataFrame(
+                [{"section": n, "first bar": a, "last bar": b} for n, (a, b) in known.items()]
+                or {"section": pd.Series([], dtype=str), "first bar": pd.Series([], dtype=int), "last bar": pd.Series([], dtype=int)}
+            )
             sections_df = st.data_editor(
-                pd.DataFrame({"section": pd.Series([], dtype=str), "start": pd.Series([], dtype=float), "end": pd.Series([], dtype=float)}),
-                num_rows="dynamic", use_container_width=True, key="up_sections_editor",
+                start, num_rows="dynamic", use_container_width=True, key=f"up_sections_editor_{name or 'new'}",
+                column_config={"first bar": st.column_config.NumberColumn(min_value=1, step=1, format="%d"),
+                               "last bar": st.column_config.NumberColumn(min_value=1, step=1, format="%d")},
             )
 
     # ---- go ----
@@ -291,8 +298,8 @@ def _render_add(repo, cfg, project_root: Path, songs: dict[str, Path]) -> None:
             st.session_state["derive_warnings"] = derive_warnings
             go = False  # don't auto-analyze a derived stem that looks suspect
         secs = {} if sections_df is None else {
-            str(r["section"]): (r["start"], r["end"]) for _, r in sections_df.iterrows()
-            if r["section"] and r["end"] > r["start"]
+            str(r["section"]): (int(r["first bar"]), int(r["last bar"])) for _, r in sections_df.iterrows()
+            if r["section"] and pd.notna(r["first bar"]) and pd.notna(r["last bar"]) and r["last bar"] >= r["first bar"]
         }
         if secs:
             save_sections(song_dir, secs)
