@@ -4,6 +4,8 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+import theme
+
 from mixlens.compare.glossary import feature_name, trend_note, what_it_measures
 
 from plots import history_line_figure
@@ -14,7 +16,7 @@ TRACKED_INSTRUMENTAL = ["lufs_i", "st_crest", "transient_ratio", "air_ratio", "t
 
 
 def render(repo, cfg) -> None:
-    st.header("History")
+    theme.page_header("History", "Follow a song across versions and see what really changed.")
     with st.expander("How to read this page", expanded=False):
         st.markdown(
             "Each chart follows one measurement across the versions of a song, oldest to newest, so you can see "

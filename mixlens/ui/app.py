@@ -13,9 +13,11 @@ if str(SRC_DIR) not in sys.path:
 from mixlens.config import load_config
 from mixlens.db.repo import Repo
 
+import theme
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-st.set_page_config(page_title="MixLens", layout="wide")
+st.set_page_config(page_title="MixLens", page_icon="🎚️", layout="wide", initial_sidebar_state="collapsed")
 
 
 @st.cache_resource
@@ -29,17 +31,18 @@ def get_config():
 
 
 def main() -> None:
-    st.sidebar.title("MixLens")
+    theme.apply()
     pages = ["Analyze", "Compare", "History", "References", "Regret"]
     # Other pages request navigation via nav_target; it has to be applied
     # before the radio is created, since a widget's state can't change after.
     target = st.session_state.pop("nav_target", None)
     if target in pages:
         st.session_state["page"] = target
-    page = st.sidebar.radio("Page", pages, key="page")
-
     repo = get_repo()
     cfg = get_config()
+    n_mixes = len(repo.get_all_versions())
+    n_refs = len(repo.list_refs()) // 2  # every reference also has a derived accompaniment row
+    page = theme.topbar(pages, f"{n_mixes} mix{'es' if n_mixes != 1 else ''} · {n_refs} refs")
 
     if page == "Analyze":
         from views import analyze

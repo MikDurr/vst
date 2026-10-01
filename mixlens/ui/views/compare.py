@@ -5,6 +5,8 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+import theme
+
 from mixlens.compare.deviation import evaluate
 from mixlens.compare.glossary import explain, feature_name, what_it_measures
 from mixlens.pipeline import INSTRUMENTAL_SUFFIX
@@ -14,7 +16,7 @@ from plots import csi_timeline_figure, ltas_vs_envelope_figure, space_sheen_scat
 
 
 def render(repo, cfg) -> None:
-    st.header("Compare")
+    theme.page_header("Compare", "See how a mix sits against the references you chose.")
     with st.expander("How to read this page"):
         st.markdown(
             "This compares **one mix version** with the **reference set for its style**, "
@@ -126,6 +128,7 @@ def render(repo, cfg) -> None:
         st.dataframe(
             flag_df.sort_values("z", key=abs, ascending=False),
             use_container_width=True, hide_index=True,
+            column_order=["measurement", "level", "your value", "z", "meaning"],
             column_config={"meaning": st.column_config.TextColumn("what it means", width="large")},
         )
         with st.expander("What each measurement is"):

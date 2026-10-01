@@ -1,2 +1,21 @@
 [server]
 maxUploadSize = 2000
+enableStaticServing = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "dark"
+primaryColor = "#1CF3F3"
+backgroundColor = "#420068"
+secondaryBackgroundColor = "#52127F"
+textColor = "#F6EDFF"
+baseRadius = "large"
+borderColor = "#7B3AA8"
+showWidgetBorder = true
+
+[[theme.fontFaces]]
+family = "Figtree"
+url = "app/static/Figtree.woff2"
+weight = "300 900"

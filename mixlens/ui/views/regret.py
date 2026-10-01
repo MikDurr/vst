@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import streamlit as st
 
+import theme
+
 from mixlens.compare.glossary import explain, feature_name
 from mixlens.compare.regret import compare_groups
 
@@ -10,7 +12,7 @@ from plots import effect_size_bar_figure
 
 
 def render(repo, cfg) -> None:
-    st.header("Regret")
+    theme.page_header("Regret", "Find which measurements predict the mixes you end up redoing.")
     with st.expander("How this works", expanded=False):
         st.markdown(
             "Weeks after finishing a mix, label it: **held_up** (still sounds good), **neutral**, or **regret** "

@@ -7,6 +7,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+import theme
+
 from mixlens.checks.peaks import CheckResult, any_fail
 from mixlens.io.ingest import (
     AUDIO_TYPES, assign_stems, derive_wet, guess_song_version, save_sections, save_stems,
@@ -33,7 +35,7 @@ def _discover_versions(song_dir: Path) -> list[str]:
 
 
 def render(repo, cfg, project_root: Path) -> None:
-    st.header("Analyze")
+    theme.page_header("Analyze", "Upload your stems, check the peaks, and run the full analysis.")
 
     songs = _discover_songs(project_root)
     _render_upload(repo, cfg, project_root, songs, expanded=not songs)

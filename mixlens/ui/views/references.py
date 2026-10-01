@@ -8,6 +8,8 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+import theme
+
 from mixlens.compare.deviation import classify_level
 from mixlens.compare.envelope import leave_one_out_audit
 from mixlens.io.ingest import AUDIO_TYPES, save_references
@@ -18,7 +20,7 @@ KNOWN_STYLES = ["dream", "hyperpop", "electroclash"]
 
 
 def render(repo, cfg, project_root) -> None:
-    st.header("References")
+    theme.page_header("References", "Build the reference sets your mixes are measured against.")
 
     references_dir = project_root / "references"
     entries = load_references_yaml(references_dir)
