@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import streamlit as st
 
+import widgets
+
 import theme
 
 from mixlens.compare.glossary import explain, feature_name
@@ -29,12 +31,15 @@ def render(repo, cfg) -> None:
     versions_df = repo.get_all_versions()
     if not versions_df.empty:
         songs = sorted(versions_df["song_id"].unique())
-        song = st.selectbox("Song", songs, key="regret_song")
+        widgets.guard("reg_song", songs)
+        song = st.selectbox("Song", songs, key="reg_song")
         song_versions = versions_df[versions_df["song_id"] == song]
-        version = st.selectbox("Version", sorted(song_versions["version"].unique()), key="regret_version")
-        rating = st.radio("Rating", ["held_up", "neutral", "regret"], horizontal=True)
-        tag = st.text_input("Tag", "")
-        note = st.text_area("Note", "")
+        v_opts = sorted(song_versions["version"].unique())
+        widgets.guard("reg_version", v_opts)
+        version = st.selectbox("Version", v_opts, key="reg_version")
+        rating = st.radio("Rating", ["held_up", "neutral", "regret"], horizontal=True, key="reg_rating")
+        tag = st.text_input("Tag", key="reg_tag")
+        note = st.text_area("Note", key="reg_note")
         if st.button("Save label"):
             version_id = int(song_versions[song_versions["version"] == version].iloc[0]["version_id"])
             repo.set_label(version_id, rating, tag=tag, note=note)

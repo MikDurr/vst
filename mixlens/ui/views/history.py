@@ -4,6 +4,8 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+import widgets
+
 import theme
 
 from mixlens.compare.glossary import feature_name, trend_note, what_it_measures
@@ -32,7 +34,8 @@ def render(repo, cfg) -> None:
         return
 
     songs = sorted(versions_df["song_id"].unique())
-    song = st.selectbox("Song", songs)
+    widgets.guard("hist_song", songs)
+    song = st.selectbox("Song", songs, key="hist_song")
     song_versions = versions_df[versions_df["song_id"] == song].sort_values("version_id")
     instrumental = bool((repo.get_song(song) or {}).get("instrumental"))
     TRACKED_FEATURES = TRACKED_INSTRUMENTAL if instrumental else TRACKED_VOCAL
@@ -81,11 +84,13 @@ def _render_diff(repo, song: str, song_versions: pd.DataFrame) -> None:
         st.caption("Need at least two analyzed versions to diff.")
         return
 
+    widgets.guard("hist_diff_a", version_options)
+    widgets.guard("hist_diff_b", version_options)
     col1, col2 = st.columns(2)
     with col1:
-        version_a = st.selectbox("From", version_options, index=max(0, len(version_options) - 2), key="diff_a")
+        version_a = st.selectbox("From", version_options, index=max(0, len(version_options) - 2), key="hist_diff_a")
     with col2:
-        version_b = st.selectbox("To", version_options, index=len(version_options) - 1, key="diff_b")
+        version_b = st.selectbox("To", version_options, index=len(version_options) - 1, key="hist_diff_b")
 
     if version_a == version_b:
         st.caption("Pick two different versions.")

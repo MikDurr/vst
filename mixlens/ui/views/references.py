@@ -1,5 +1,4 @@
-"""References page: register reference tracks, build envelopes, per-style
-list, leave-one-out results, feature distributions -- no CLI needed."""
+"""References page: the songs your mixes are measured against."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,125 +7,107 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+import jobs
 import theme
-
+import widgets
 from mixlens.compare.deviation import classify_level
 from mixlens.compare.envelope import leave_one_out_audit
-from mixlens.io.ingest import AUDIO_TYPES, save_references
+from mixlens.io.ingest import save_references
 from mixlens.io.sidecar import load_references_yaml, update_reference_meta
-from mixlens.pipeline import INSTRUMENTAL_SUFFIX, analyze_reference, build_style_envelopes
-
-KNOWN_STYLES = ["dream", "hyperpop", "electroclash"]
+from mixlens.pipeline import ACCOMPANIMENT_TAG, analyze_reference, build_style_envelopes
 
 
 def render(repo, cfg, project_root) -> None:
-    theme.page_header("References", "Build the reference sets your mixes are measured against.")
+    theme.page_header("References", "The songs whose mix you want yours to sit near.")
+    references_dir: Path = project_root / "references"
 
-    references_dir = project_root / "references"
-    entries = load_references_yaml(references_dir)
-    known_styles = sorted(set(KNOWN_STYLES) | {e.style for e in entries})
+    theme.callout(
+        "<b>References belong to a style, not to a song.</b> Pick a style, add the songs whose <i>mix</i> you love "
+        "(8 to 20 is ideal), and every song of that style gets compared against them. "
+        "Choose them for how they're mixed (vocal blend, reverb, sheen), not just because you like the song."
+    )
 
-    _render_add_references(references_dir, known_styles, entries)
+    style = widgets.style_picker("Style", "ref_style", cfg, repo, project_root)
+    entries = [e for e in load_references_yaml(references_dir) if e.style == style]
+
+    _render_add(references_dir, style, expanded=not entries)
 
     if not entries:
-        st.info("No references registered yet. Use \"Add references\" above.")
+        st.caption(f"No references for '{style}' yet.")
         return
 
-    styles = sorted({e.style for e in entries})
-    style = st.selectbox("Style", styles)
-    style_entries = [e for e in entries if e.style == style]
+    st.subheader(f"{len(entries)} reference{'s' if len(entries) != 1 else ''} in '{style}'")
+    _render_editor(references_dir, entries)
+    if len(entries) < 8:
+        st.caption(f"The comparison works best with 12 to 20. With only {len(entries)}, treat the results as a rough guide.")
 
-    st.subheader(f"{len(style_entries)} references")
-    _render_metadata_editor(references_dir, style_entries)
-    if len(style_entries) < 8:
-        st.caption(
-            f"Only {len(style_entries)} references for '{style}' -- the spec recommends 12-20; "
-            "fewer than 8 makes the percentiles meaningless."
-        )
-
-    _render_build_envelopes(repo, cfg, references_dir, style, style_entries)
+    _render_analyze(repo, cfg, references_dir, style, entries)
 
     df = repo.get_features_for_style(style, entity="ref")
     if df.empty:
-        st.warning("No analyzed features for this style yet. Use \"Build envelopes\" above.")
         return
-
-    st.subheader("Leave-one-out audit")
-    audit_df = leave_one_out_audit(df, style, lambda v, env: classify_level(v, env, cfg))
-    st.dataframe(audit_df.sort_values("n_flags", ascending=False), use_container_width=True)
-    st.caption("References with more than 3 flags may belong to another style, or be worth dropping.")
-
-    st.subheader("Feature distributions")
-    scalar_features = sorted(df[df["band"] == ""]["feature"].unique())
-    feature = st.selectbox("Feature", scalar_features)
-    sub = df[(df["feature"] == feature) & (df["band"] == "")]
-    st.plotly_chart(px.histogram(sub, x="value", title=feature), use_container_width=True)
-
-
-def _render_add_references(references_dir: Path, known_styles: list[str], entries: list) -> None:
-    with st.expander("Upload references", expanded=not entries):
-        st.caption(
-            "Full, untouched songs (WAV/FLAC, or 256kbps+ AAC / 320kbps MP3). "
-            "Choose ones whose *mix* you want yours to sit near: 12-20 per style, "
-            "max 3 per artist. Files are stored as-is under `references/<style>/`."
+    with st.expander("Check for odd one out"):
+        st.caption("Scores each reference against all the others. One with more than 3 flags probably belongs to a different style, or is worth dropping.")
+        audit = leave_one_out_audit(df, style, lambda v, env: classify_level(v, env, cfg))
+        st.dataframe(audit.sort_values("n_flags", ascending=False), use_container_width=True, hide_index=True)
+    with st.expander("See how your references are spread"):
+        feats = sorted(df[df["band"] == ""]["feature"].unique())
+        feat = st.selectbox("Measurement", feats, key="ref_dist_feature")
+        st.plotly_chart(
+            theme.style_figure(px.histogram(df[(df["feature"] == feat) & (df["band"] == "")], x="value", title=feat)),
+            use_container_width=True,
         )
-        style = st.selectbox("Style", known_styles, key="add_ref_style")
-        files = st.file_uploader(
-            "Reference songs", type=AUDIO_TYPES, accept_multiple_files=True, key=f"add_ref_files_{style}"
-        )
-        if st.button("Add to library", disabled=not files):
-            added = save_references(references_dir, style, [(f.name, f.getvalue()) for f in files])
-            if added:
-                st.success(f"Added {len(added)} reference(s). Fill in artist/title below, then build envelopes.")
-                st.rerun()
-            else:
-                st.warning("Those files are already in the library.")
 
 
-def _render_metadata_editor(references_dir: Path, style_entries: list) -> None:
-    st.caption("Double-click a cell to edit artist / title / note. Notes help you remember why a track is in the set.")
-    df = pd.DataFrame([{"path": e.path, "artist": e.artist, "title": e.title, "note": e.note} for e in style_entries])
-    edited = st.data_editor(df, use_container_width=True, disabled=["path"], hide_index=True, key="ref_editor")
-    if not edited.equals(df) and st.button("Save edits"):
-        for _, row in edited.iterrows():
-            update_reference_meta(references_dir, row["path"], row["artist"], row["title"], row["note"])
-        st.success("Saved.")
+def _render_add(references_dir: Path, style: str, expanded: bool) -> None:
+    with st.expander(f"Add references to '{style}'", expanded=expanded):
+        st.caption("Full, untouched songs: WAV or FLAC, or 256 kbps+ AAC / 320 kbps MP3. Don't trim or normalise them.")
+        sources = widgets.file_source("ref_src", label="Drop reference songs here")
+        if st.button(f"Add {len(sources) or ''} song{'s' if len(sources) != 1 else ''}", disabled=not sources, type="primary"):
+            added = save_references(references_dir, style, [(n, load()) for n, load in sources.items()])
+            st.session_state.pop("_ref_src_cache", None)
+            st.toast(f"Added {len(added)} reference(s)." if added else "Those songs are already in the library.")
+            st.rerun()
+
+
+def _render_editor(references_dir: Path, entries: list) -> None:
+    st.caption("Double-click to add the artist, title and a note about why it's in the set.")
+    df = pd.DataFrame([{"file": e.path, "artist": e.artist, "title": e.title, "note": e.note} for e in entries])
+    edited = st.data_editor(df, use_container_width=True, disabled=["file"], hide_index=True, key="ref_table_editor")
+    if not edited.equals(df) and st.button("Save changes"):
+        for _i, row in edited.iterrows():
+            update_reference_meta(references_dir, row["file"], row["artist"], row["title"], row["note"])
+        st.toast("Saved.")
         st.rerun()
-
-    artists = edited["artist"].replace("", pd.NA).dropna().value_counts()
-    over = artists[artists > 3]
+    over = edited["artist"].replace("", pd.NA).dropna().value_counts()
+    over = over[over > 3]
     if len(over):
-        st.warning("More than 3 tracks by: " + ", ".join(over.index) + " -- the envelope will reflect one engineer's fingerprint.")
+        st.warning("More than 3 songs by: " + ", ".join(over.index) + ". The range will reflect one engineer's fingerprint.")
 
 
-def _render_build_envelopes(repo, cfg, references_dir: Path, style: str, style_entries: list) -> None:
-    with st.expander("Build envelopes", expanded=False):
-        st.caption(
-            f"Analyzes every '{style}' reference not yet in the database (splits "
-            "with Demucs), then rebuilds the style envelope used by the Compare page. It also measures each "
-            "reference with its vocals removed (the Demucs accompaniment), which is what an *instrumental* song "
-            "is compared against."
-        )
-        if st.button(f"Build envelopes for '{style}'", type="primary"):
-            progress = st.progress(0.0, text="Starting...")
-            errors = []
-            for i, entry in enumerate(style_entries):
-                progress.progress(i / max(len(style_entries), 1), text=f"Analyzing {entry.path}...")
-                try:
-                    analyze_reference(entry, references_dir, cfg, repo, references_dir.parent / ".cache")
-                except Exception as e:
-                    errors.append(f"{entry.path}: {e}")
-            progress.progress(1.0, text="Building envelope...")
+def _render_analyze(repo, cfg, references_dir: Path, style: str, entries: list) -> None:
+    st.subheader("Measure them")
+    known = set(repo.list_refs(style)["path"])
+    todo = [e for e in entries if e.path not in known or e.path + ACCOMPANIMENT_TAG not in set(repo.list_refs(style + "::instrumental")["path"])]
+    done = len(entries) - len(todo)
+    busy = jobs.is_running("references")
 
-            built = build_style_envelopes(repo, style)
-            if not built:
-                st.error("No features were extracted -- nothing to build an envelope from.")
-            for key, n in built.items():
-                label = "vocals removed (for instrumentals)" if key.endswith(INSTRUMENTAL_SUFFIX) else "full mix"
-                st.success(f"Built {n} envelope entries for '{style}' [{label}].")
+    theme.callout(
+        f"<b>{done} of {len(entries)} measured.</b> Measuring takes about a minute per song. Each reference is measured "
+        "twice: as it is (used for songs with vocals) and with the vocals stripped out (used for instrumentals), "
+        "so there's nothing to choose later. Run it again whenever you add songs."
+    )
+    redo = st.checkbox("Re-measure all of them, even ones already done", key="ref_remeasure") if not todo else False
+    targets = entries if redo else todo
+    label = f"Measure {len(targets)} reference{'s' if len(targets) != 1 else ''}" if targets else "All references are measured"
+    if st.button(label, type="primary", disabled=busy or not targets):
+        cache = references_dir.parent / ".cache"
 
-            for msg in errors:
-                st.error(f"Failed: {msg}")
+        def run() -> str:
+            for entry in targets:
+                analyze_reference(entry, references_dir, cfg, repo, cache)
+            build_style_envelopes(repo, style)
+            return f"{len(targets)} reference(s) measured. '{style}' comparisons are ready."
 
-            if not errors:
-                st.rerun()
+        jobs.submit("references", f"Measuring {len(targets)} '{style}' references", run)
+        st.rerun()

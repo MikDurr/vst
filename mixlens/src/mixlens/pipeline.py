@@ -159,3 +159,25 @@ def build_hints(results: list[DeviationResult], repo: Repo, version_id: int, cfg
     features = repo.get_features(entity="version", entity_id=version_id)
     extra_values = {row["feature"]: row["value"] for _i, row in features.iterrows() if row["band"] == ""}
     return match_hints(results, hint_rules, extra_values=extra_values)
+
+
+def reference_range_key(style: str, instrumental: bool, refs_have_vocals: bool = True) -> str:
+    """Which reference range a song is compared against. Instrumentals use the
+    references measured with vocals removed, unless the references are
+    themselves instrumentals."""
+    return style + INSTRUMENTAL_SUFFIX if instrumental and refs_have_vocals else style
+
+
+def recommendations_for(repo: Repo, cfg: Config, version_id: int, range_key: str):
+    """(recommendations, deviation results, has a reference range) for one analyzed version."""
+    from mixlens.compare.recommend import recommend
+
+    features = repo.get_features(entity="version", entity_id=version_id)
+    values = {(r["feature"], r["band"]): float(r["value"]) for _i, r in features.iterrows()}
+    envelopes = repo.get_envelopes(range_key)
+    results = [evaluate(v, envelopes[k], cfg) for k, v in values.items() if k in envelopes]
+    rules = {r["id"]: r for r in cfg.get("hints", [])}
+    scalars = {f: v for (f, b), v in values.items() if b == ""}
+    hints = match_hints(results, list(rules.values()), extra_values=scalars)
+    recs = recommend(repo.get_checks(version_id), values, results, hints, rules, bool(envelopes))
+    return recs, results, bool(envelopes)

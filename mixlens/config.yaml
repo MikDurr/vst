@@ -3,6 +3,13 @@
 # and record its hash in each analysis once you've tuned it against your ears.
 
 sample_rate: 44100
+
+# Styles offered in the UI. `yours` are the sets you build most; `genres` are
+# general starting points. Anything else can be typed in as a new style.
+styles:
+  yours: [dream, hyperpop, electroclash]
+  genres: [pop, hip-hop, trap, r-and-b, house, techno, trance, drum-and-bass, dubstep, future-bass,
+           synthwave, disco, ambient, lo-fi, indie, rock, afrobeats, reggaeton]
 loudness_target_lufs: -14.0
 
 stft:

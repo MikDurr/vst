@@ -67,7 +67,7 @@ def _css() -> str:
   --text:{TEXT}; --muted:{MUTED}; --lime:{LIME}; --cyan:{CYAN}; --blue:{BLUE}; --pink:{PINK};
   --ease: cubic-bezier(.16,1,.3,1);
 }}
-html, body, .stApp, [class*="st-"], button, input, textarea, select {{
+html, body, .stApp, .stApp *, button, input, textarea, select {{
   font-family: 'Figtree', ui-sans-serif, system-ui, sans-serif !important;
 }}
 /* material icons must keep their own font */
@@ -215,6 +215,27 @@ hr {{ border-color: var(--line); }}
   [data-testid="stMainBlockContainer"] {{ padding-top: 9rem; }}
   .hero {{ padding-top: 2rem; }}
 }}
+
+/* ---- recommendation + job cards ---- */
+.rec {{ background: {PANEL}; border: 1px solid var(--line); border-radius: 20px; padding: 1.15rem 1.4rem; margin: .75rem 0;
+        box-shadow: 0 14px 30px -18px rgba(0,0,0,.6); }}
+.rec .top {{ display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; margin-bottom: .35rem; }}
+.rec h4 {{ margin: 0; font-size: 1.25rem; font-weight: 800; color: #fff; letter-spacing: -.02em; }}
+.rec p {{ margin: .25rem 0; font-size: 1.02rem; line-height: 1.55; color: #E3D2F7; }}
+.rec .try {{ color: {LIME}; font-weight: 700; }}
+.rec .ev {{ font-size: .88rem; color: #CDB4EA; margin-top: .45rem; }}
+.chip {{ font-size: .78rem; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; padding: .25rem .7rem; border-radius: 999px; color: {BG_DEEP}; }}
+.chip.fix {{ background: #FF8A8A; }} .chip.check {{ background: {YELLOW}; }} .chip.note {{ background: {LAVENDER}; }} .chip.ok {{ background: {GREEN}; }}
+.job {{ display: flex; align-items: center; gap: 1rem; border-radius: 18px; padding: .9rem 1.3rem; margin: .8rem 0 .3rem; border: 1px solid var(--line); background: {PANEL_HI}; }}
+.job b {{ font-size: 1.08rem; color: #fff; display: block; }} .job span {{ color: #E3D2F7; font-size: .96rem; }}
+.job .dot {{ width: 14px; height: 14px; border-radius: 50%; background: {LIME}; flex: none; animation: pulse 1.2s ease-in-out infinite; }}
+.job.done .dot {{ background: {GREEN}; animation: none; }} .job.error .dot {{ background: #FF6B6B; animation: none; }}
+.job.done {{ border-color: rgba(43,214,123,.7); }} .job.error {{ border-color: rgba(255,107,107,.8); }}
+@keyframes pulse {{ 50% {{ transform: scale(1.5); opacity: .5 }} }}
+@media (prefers-reduced-motion: reduce) {{ .job .dot {{ animation: none }} }}
+.summary-line {{ font-size: 1.15rem; font-weight: 600; color: #fff; margin: .2rem 0 .6rem; }}
+.callout {{ background: rgba(0,0,0,.22); border: 1px solid var(--line); border-radius: 16px; padding: 1rem 1.3rem; margin: .5rem 0 1rem; color: #E3D2F7; }}
+.callout b {{ color: #fff; }}
 </style>
 """
 
@@ -281,3 +302,27 @@ def style_figure(fig, height: int | None = None):
     if height:
         fig.update_layout(height=height)
     return fig
+
+
+def rec_card(rec) -> None:
+    label = {"fix": "Fix first", "check": "Take a look", "note": "Good to know"}[rec.severity]
+    ev = f'<div class="ev">{html.escape(rec.evidence)}</div>' if rec.evidence else ""
+    st.markdown(
+        f'<div class="rec"><div class="top"><span class="chip {rec.severity}">{label}</span>'
+        f"<h4>{html.escape(rec.title)}</h4></div>"
+        f"<p>{html.escape(rec.why)}</p><p class=\"try\">Try: {html.escape(rec.action)}</p>{ev}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def job_card(state: str, title: str, body: str) -> None:
+    st.markdown(
+        f'<div class="job {state}"><i class="dot"></i><div><b>{html.escape(title)}</b>'
+        f"<span>{html.escape(body)}</span></div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def callout(html_body: str) -> None:
+    """A quiet explanatory panel. `html_body` is trusted markup written in the views."""
+    st.markdown(f'<div class="callout">{html_body}</div>', unsafe_allow_html=True)

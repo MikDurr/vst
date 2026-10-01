@@ -158,3 +158,41 @@ def trend_note(feature: str, first: float, last: float) -> str:
     if entry:
         note += f" Moving toward: {entry[3] if delta > 0 else entry[2]}"
     return note
+
+
+# What to actually do about it: (feature, direction vs references) -> a concrete move.
+ACTIONS: dict[tuple[str, str], str] = {
+    ("lufs_i", "high"): "Back the limiter off 1-2 dB. Streaming services turn loud masters down anyway, so you gain nothing and lose punch.",
+    ("lufs_i", "low"): "Raise the limiter input gain a little, or check the mix bus isn't being held back by one loud element.",
+    ("plr", "low"): "You are limiting hard. Lower the limiter gain or raise its threshold so peaks stand out from the average again.",
+    ("plr", "high"): "Peaks stick out a lot. A touch more bus compression or limiter gain would tighten it.",
+    ("crest", "low"): "Dynamics are squashed. Ease off bus compression and the limiter, and check for stacked compressors.",
+    ("st_crest", "low"): "Ease the bus compressor, limiter or OTT depth. Parallel-blend the heavily compressed copy instead of replacing the dry one.",
+    ("transient_ratio", "low"): "Drums and plucks are losing their attack. Slow the compressor attack, or add a transient shaper on the drum bus.",
+    ("pump_depth", "high"): "Lengthen the compressor release or reduce sidechain depth so the bed recovers faster between kicks.",
+    ("vir_med", "high"): "Pull the vocal fader down about 1-2 dB, or automate it down in the busiest sections.",
+    ("vir_med", "low"): "Raise the vocal 1-2 dB, or carve space for it in the instrumental around 1-4 kHz.",
+    ("csi", "low"): "Words are getting buried. EQ the instrumental down 2-3 dB around 2-5 kHz under the vocal, or lift the vocal's presence band.",
+    ("csi_p10", "low"): "The quietest words vanish. Compress or ride the vocal so soft words keep up, and automate problem phrases.",
+    ("vox_consistency", "high"): "The vocal level is uneven. Add compression or clip-gain the quiet words up.",
+    ("vox_sib", "high"): "Add or deepen a de-esser before the reverb send, and check bright reverb isn't amplifying the S sounds.",
+    ("vox_harsh", "high"): "Dip the vocal 2-5 dB around 3-4 kHz with a dynamic EQ, or soften the saturation stage.",
+    ("vox_tail_level", "high"): "The reverb is loud. Lower the return level or add a high-cut and pre-delay so it doesn't cover the next word.",
+    ("space_contrast", "low"): "Vocal and instrumental share one space. Make the instrumental drier (less reverb on synths/drums) or add more vocal reverb.",
+    ("vox_tail_bright", "low"): "The reverb tail is darker than your references. Raise the reverb's high cut, or add a high shelf on the return.",
+    ("air_ratio", "low"): "The top end is dull. Try a high shelf (+1-2 dB around 10 kHz) on the mix bus, or brighter sources.",
+    ("air_ratio", "high"): "Very bright top end. Roll back the high shelf or check for harsh exciters.",
+    ("hf_density", "high"): "The top end is peaky rather than dense. Add saturation or gentle upward compression on bright elements.",
+    ("hf_flatness", "high"): "The top is fizzy. Check stacked distortion and de-essing; low-pass noisy layers around 14-16 kHz.",
+    ("side_mid_air", "low"): "Highs are narrow. Widen bright layers with a stereo widener or short stereo delays.",
+    ("vox_floor_true", "high"): "Breaths and noise are being lifted. Gate or edit the gaps before any upward compression like OTT.",
+    ("duck_depth_true", "low"): "Add sidechain compression on the reverb return, keyed from the dry vocal, so it blooms in the gaps.",
+    ("csi_wash_drop_true", "high"): "Your reverb is covering your own consonants. Add pre-delay, duck the return, or shorten the decay.",
+    ("csi_phone_delta", "low"): "Words collapse on small speakers. Check the vocal against a phone-speaker EQ and lift 1-3 kHz.",
+    ("pump_depth", "low"): "Little pumping versus your references. If you want that feel, increase sidechain depth.",
+}
+
+
+def action_for(feature: str, direction: str) -> str:
+    base = feature[:-5] if feature.endswith("_true") and feature not in {a for a, _ in ACTIONS} else feature
+    return ACTIONS.get((feature, direction)) or ACTIONS.get((base, direction), "")

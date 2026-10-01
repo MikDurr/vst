@@ -66,6 +66,11 @@ class Repo:
                 (song_id, style, bpm, int(instrumental)),
             )
 
+    def list_styles(self) -> list[str]:
+        with self.cursor() as cur:
+            cur.execute("SELECT DISTINCT style FROM songs WHERE style IS NOT NULL")
+            return [r[0] for r in cur.fetchall()]
+
     def get_song(self, song_id: str) -> dict | None:
         with self.cursor() as cur:
             cur.execute("SELECT style, bpm, instrumental FROM songs WHERE song_id=?", (song_id,))
