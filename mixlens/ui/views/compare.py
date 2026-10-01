@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 import theme
-from mixlens.compare.glossary import explain, feature_name, what_it_measures
+from mixlens.compare.glossary import explain, feature_name, format_value, what_it_measures
 from mixlens.pipeline import recommendations_for, reference_range_key
 from plots import ltas_vs_envelope_figure, space_sheen_scatter
 
@@ -49,6 +49,8 @@ def render(repo, cfg) -> None:
     range_key = reference_range_key(style, instrumental, refs_have_vocals)
     recs, results, has_range = recommendations_for(repo, cfg, version_id, range_key)
 
+    _render_safety(repo.get_checks(version_id))
+
     # ---- what to do next ----
     st.subheader("What to do next")
     fixes = [r for r in recs if r.severity == "fix"]
@@ -80,7 +82,6 @@ def render(repo, cfg) -> None:
         st.markdown(
             "- *ok* means inside the range your references cover (their middle 80%). *watch* is moderately outside, "
             "a hint only. *flag* is clearly outside.\n"
-            "- **z** is how many typical spreads you are from the reference median.\n"
             "- A flag isn't an error. If your references don't share the sound you want, the flag is telling you about the references."
         )
 
@@ -96,10 +97,14 @@ def render(repo, cfg) -> None:
     st.markdown("##### Everything outside your references' range")
     if flagged:
         flag_df = pd.DataFrame([
-            {"measurement": feature_name(r.feature) + (f" [{r.band}]" if r.band else ""), "level": r.level,
-             "your value": round(r.value, 2), "z": round(r.z, 2), "meaning": explain(r.feature, r.direction)}
+            {"measurement": feature_name(r.feature) + (f" ({r.band.replace('Hz', ' Hz')})" if r.band else ""),
+             "how far off": {"flag": "clearly", "watch": "a bit"}[r.level],
+             "you": format_value(r.feature, r.value),
+             "your references": (f"{format_value(r.feature, r.ref_low)} to {format_value(r.feature, r.ref_high)}"
+                                 if r.ref_low is not None else ""),
+             "meaning": explain(r.feature, r.direction), "_z": abs(r.z)}
             for r in flagged
-        ]).sort_values("z", key=abs, ascending=False)
+        ]).sort_values("_z", ascending=False).drop(columns="_z")
         st.dataframe(flag_df, use_container_width=True, hide_index=True,
                      column_config={"meaning": st.column_config.TextColumn("what it means", width="large")})
         with st.expander("What each measurement is"):
@@ -124,3 +129,24 @@ def render(repo, cfg) -> None:
         st.caption("Right = wetter vocal over a drier instrumental. Up = brighter, airier top end. "
                    "Violet dots are your references; the star is this mix. Aim to land inside the cloud you like.")
         st.plotly_chart(space_sheen_scatter(pd.DataFrame(rows)), use_container_width=True)
+
+
+def _render_safety(checks: pd.DataFrame) -> None:
+    """Always-visible peak safety line, so clipping and true peak never hide in a sub-page."""
+    if checks.empty:
+        return
+    mix = checks[checks["stem"] == "mix"]
+    def val(name):
+        r = mix[mix["check_name"] == name]
+        return None if r.empty else r.iloc[0]
+    tp, clip, isp = val("true_peak"), val("clip_runs"), val("isp_overs")
+    bad = [c for c in (tp, clip, isp) if c is not None and c["level"] == "fail"]
+    warn = [c for c in (tp,) if c is not None and c["level"] == "warn"]
+    state = "fail" if bad else "warn" if warn else "ok"
+    parts = []
+    if tp is not None:
+        parts.append(f"true peak {tp['value']:.1f} dBTP")
+    if clip is not None:
+        parts.append("clipping found" if clip["level"] == "fail" else "no clipping")
+    chip = {"ok": ("ok", "Peaks safe"), "warn": ("check", "Peaks close to the limit"), "fail": ("fix", "Peak problem")}[state]
+    st.markdown(f'<p class="summary-line"><span class="chip {chip[0]}">{chip[1]}</span> &nbsp;{" · ".join(parts)}</p>', unsafe_allow_html=True)

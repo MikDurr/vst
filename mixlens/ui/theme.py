@@ -44,8 +44,8 @@ def _blob_svg() -> str:
     dots = [(150, 150), (30, 420), (210, 700), (1360, 330), (1260, 560), (1410, 640), (1180, 880), (110, 40)]
     parts = [
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice">',
-        '<path d="M-40 90 C 60 -20, 130 40, 70 200 S -30 520, 70 640 S 180 800, 120 940" fill="none" stroke="#CDF564" '
-        'stroke-width="26" stroke-linecap="round" opacity=".95"/>',
+        '<path d="M-60 90 C 20 -20, 80 40, 30 200 S -50 520, 30 640 S 110 800, 70 940" fill="none" stroke="#CDF564" '
+        'stroke-width="20" stroke-linecap="round" opacity=".9"/>',
     ]
     for cx, cy, rx, ry, col, rot in blobs:
         parts.append(f'<ellipse cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}" fill="{col}" transform="rotate({rot} {cx} {cy})"/>')
@@ -77,7 +77,7 @@ html, body, .stApp, .stApp *, button, input, textarea, select {{
 .stApp::before {{
   content:""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
   background: url("data:image/svg+xml;utf8,{_blob_svg()}") center/cover no-repeat;
-  animation: drift 18s ease-in-out infinite alternate;
+  opacity: .8; animation: drift 18s ease-in-out infinite alternate;
 }}
 @keyframes drift {{ from {{ transform: translateY(0) }} to {{ transform: translateY(-14px) }} }}
 @media (prefers-reduced-motion: reduce) {{ .stApp::before {{ animation: none }} }}
@@ -124,21 +124,24 @@ html, body {{ overflow-x: hidden; }}
 .st-key-topbar label[data-baseweb="radio"]:has(input:focus-visible) {{ outline: 3px solid {CYAN}; outline-offset: 2px; }}
 
 /* ---- hero ---- */
-.hero {{ position: relative; padding: 4rem 0 2.2rem; }}
+.hero {{ position: relative; padding: 2.6rem 0 1.6rem; }}
 .hero h1 {{
-  padding: 0 !important; font-size: clamp(2.6rem, 6vw, 4.6rem); line-height: 1.02; letter-spacing: -.035em; font-weight: 900;
+  padding: 0 !important; font-size: clamp(2.6rem, 5vw, 4rem); line-height: 1.04; letter-spacing: -.035em; font-weight: 900;
   color: {LIME}; margin: 0 0 .6rem; text-wrap: balance; max-width: 16ch;
 }}
-.hero p {{ font-size: 1.35rem; font-weight: 500; color: #E8F7B4; margin: 0; max-width: 46ch; text-wrap: pretty; }}
+.hero p {{ font-size: 1.2rem; font-weight: 400; color: {LAVENDER}; margin: 0; max-width: 46ch; text-wrap: pretty; }}
 .hero .conf {{ position:absolute; right: 0; top: 1.2rem; width: min(46%, 440px); height: 240px; pointer-events:none; }}
 @media (max-width: 760px) {{ .hero .conf {{ display:none }} }}
 
 /* ---- type ---- */
 h1, h2, h3, h4 {{ color: #fff; letter-spacing: -.02em; }}
-[data-testid="stHeading"] h2, .stMarkdown h2 {{ font-size: 1.9rem; font-weight: 800; margin-top: 2rem; }}
-[data-testid="stHeading"] h3, .stMarkdown h3 {{ font-size: 1.45rem; font-weight: 800; margin-top: 1.8rem; color: {LIME}; }}
-[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] *, .stCaption, small {{ opacity: 1 !important; color: #E3D2F7 !important; font-size: .95rem; }}
-.stMarkdown p, .stMarkdown li {{ font-size: 1.04rem; line-height: 1.6; }}
+[data-testid="stHeading"] h2, .stMarkdown h2 {{ font-size: 1.9rem; font-weight: 800; margin-top: 2rem; color: #fff; }}
+[data-testid="stHeading"] h3, .stMarkdown h3 {{ font-size: 1.7rem; font-weight: 800; margin-top: 2.2rem; color: #fff; }}
+[data-testid="stHeading"] h3::after {{ content: ''; display: block; width: 44px; height: 4px; border-radius: 4px; background: {LIME}; margin-top: .45rem; }}
+.stMarkdown h5 {{ font-size: 1.15rem; font-weight: 800; color: {LAVENDER}; margin: 1.4rem 0 .4rem; }}
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] *, .stCaption, small {{ opacity: 1 !important; color: #D8C3F0 !important; font-size: .92rem; font-weight: 400; }}
+.stMarkdown p, .stMarkdown li {{ font-size: 1.04rem; line-height: 1.6; font-weight: 400; }}
+.stMarkdown strong {{ font-weight: 800; }}
 .stMarkdown a {{ color: {CYAN}; text-underline-offset: 3px; }}
 .stMarkdown code {{ background: rgba(255,255,255,.12); color: #fff; border-radius: 6px; padding: .1rem .4rem; font-family: ui-monospace, Menlo, monospace !important; }}
 .stMarkdown table {{ border-collapse: separate; border-spacing: 0; width: 100%; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }}
@@ -155,12 +158,12 @@ h1, h2, h3, h4 {{ color: #fff; letter-spacing: -.02em; }}
 [data-testid="stBaseButton-primary"]:active:not(:disabled) {{ transform: translateY(2px); box-shadow: 0 2px 0 rgba(0,0,0,.18); }}
 [data-testid="stBaseButton-secondary"] {{ background: transparent; color: #fff; border: 2px solid rgba(255,255,255,.55); }}
 [data-testid="stBaseButton-secondary"]:hover:not(:disabled) {{ border-color: {LIME}; color: {LIME}; background: rgba(205,245,100,.08); transform: translateY(-2px); }}
-[data-testid^="stBaseButton"]:disabled {{ opacity: .38; }}
+[data-testid^="stBaseButton"]:disabled {{ opacity: .4; cursor: not-allowed; background-image: repeating-linear-gradient(135deg, transparent 0 8px, rgba(0,0,0,.14) 8px 16px); }}
 [data-testid^="stBaseButton"]:focus-visible {{ outline: 3px solid {LIME}; outline-offset: 3px; }}
 
 /* ---- inputs ---- */
 [data-baseweb="input"], [data-baseweb="base-input"], [data-baseweb="select"] > div, [data-baseweb="textarea"] {{
-  background: rgba(0,0,0,.22) !important; border-radius: 14px !important; border: 1.5px solid rgba(255,255,255,.2) !important;
+  background: rgba(0,0,0,.22) !important; border-radius: 14px !important; border: 1.5px solid #8F63C9 !important; min-height: 2.9rem;
 }}
 [data-baseweb="input"]:focus-within, [data-baseweb="select"]:focus-within > div {{ border-color: {CYAN} !important; box-shadow: 0 0 0 3px rgba(28,243,243,.25); }}
 input, textarea {{ color: #fff !important; font-weight: 600; }}
@@ -177,6 +180,15 @@ label, [data-testid="stWidgetLabel"] p {{ color: {LAVENDER} !important; font-wei
 [data-testid="stExpander"] [data-testid="stExpanderDetails"] {{ padding: .4rem 1.4rem 1.4rem; }}
 [data-testid="stExpander"] [data-testid="stExpander"] {{ background: rgba(0,0,0,.2); box-shadow: none; }}
 
+/* help panels: quiet text links, not another box */
+.st-key-help [data-testid="stExpander"] {{ background: transparent; border: 0; box-shadow: none; }}
+.st-key-help [data-testid="stExpander"] summary {{ padding: .4rem 0; font-size: 1rem; color: {CYAN}; font-weight: 700; }}
+.st-key-help [data-testid="stExpander"] summary:hover {{ background: transparent; text-decoration: underline; text-underline-offset: 4px; }}
+.st-key-help [data-testid="stExpanderDetails"] {{ padding: .4rem 0 1rem; }}
+h1, h2, h3, h4, h5, .hero {{ scroll-margin-top: 90px; }}
+.tile {{ background: {PANEL}; border: 1px solid var(--line); border-radius: 20px; padding: 1.2rem 1.4rem; height: 100%; }}
+.tile .big {{ font-size: 2.4rem; font-weight: 900; letter-spacing: -.03em; color: {LIME}; line-height: 1.1; }}
+.tile .name {{ font-weight: 800; color: #fff; margin-top: .3rem; }} .tile p {{ margin: .35rem 0 0; color: #D8C3F0; font-size: .95rem; }}
 /* ---- alerts ---- */
 [data-testid="stAlertContainer"] {{ background: transparent !important; border-radius: 16px; }}
 [data-testid="stAlert"] {{ border-radius: 16px; border: 1px solid transparent; padding: .35rem .4rem; }}
@@ -209,10 +221,11 @@ hr {{ border-color: var(--line); }}
   .brand span, .status-pill {{ display: none; }}
 }}
 @media (max-width: 760px) {{
-  .st-key-topbar [role="radiogroup"] {{ justify-content: flex-start; overflow-x: auto; flex-wrap: nowrap; }}
+  .st-key-topbar [role="radiogroup"] {{ justify-content: flex-start; flex-wrap: wrap; gap: .25rem; }}
+  .st-key-topbar label[data-baseweb="radio"] {{ padding: .35rem .8rem; }}
   .st-key-topbar [data-testid="stHorizontalBlock"] {{ flex-wrap: wrap; gap: .8rem; }}
   .st-key-topbar [data-testid="stColumn"] {{ min-width: 100% !important; }}
-  [data-testid="stMainBlockContainer"] {{ padding-top: 9rem; }}
+  [data-testid="stMainBlockContainer"] {{ padding-top: 11rem; }}
   .hero {{ padding-top: 2rem; }}
 }}
 
@@ -326,3 +339,21 @@ def job_card(state: str, title: str, body: str) -> None:
 def callout(html_body: str) -> None:
     """A quiet explanatory panel. `html_body` is trusted markup written in the views."""
     st.markdown(f'<div class="callout">{html_body}</div>', unsafe_allow_html=True)
+
+
+def stat_tile(value: str, name: str, blurb: str) -> None:
+    st.markdown(
+        f'<div class="tile"><div class="big">{html.escape(value)}</div><div class="name">{html.escape(name)}</div>'
+        f"<p>{html.escape(blurb)}</p></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def scroll_to_top() -> None:
+    """Pages open at the top rather than wherever the last page was scrolled to."""
+    import streamlit.components.v1 as components
+
+    components.html(
+        "<script>const m=window.parent.document.querySelector('[data-testid=stMain]');if(m)m.scrollTo(0,0);</script>",
+        height=0,
+    )

@@ -90,3 +90,32 @@ def test_old_database_gains_instrumental_column(tmp_path):
     con.close()
     repo = Repo(db)
     assert repo.get_song("x") == {"style": "dream", "bpm": 120.0, "instrumental": False}
+
+
+def test_deleting_a_version_and_a_reference_cleans_the_database(tmp_path, cfg, monkeypatch):
+    repo = Repo(tmp_path / "t.db")
+    repo.upsert_song("s", "dream", 120)
+    vid = repo.upsert_version("s", "v1", "h", "c")
+    from mixlens.types import FeatureRow
+    repo.insert_features("version", vid, [FeatureRow("lufs_i", -10.0)])
+    repo.set_label(vid, "regret")
+    repo.delete_version("s", "v1")
+    assert repo.get_all_versions().empty and repo.get_features().empty and repo.get_labels().empty and repo.get_song("s") is None
+
+    rid = repo.upsert_ref("dream/a.wav", "dream", "", "", "h", "")
+    aid = repo.upsert_ref("dream/a.wav#accompaniment", "dream::instrumental", "", "", "h", "")
+    repo.insert_features("ref", rid, [FeatureRow("lufs_i", -9.0)])
+    repo.insert_features("ref", aid, [FeatureRow("lufs_i", -10.0)])
+    repo.delete_ref("dream/a.wav")
+    assert repo.list_refs().empty and repo.get_features().empty
+
+
+def test_remove_reference_from_yaml_and_disk(tmp_path):
+    from mixlens.io.sidecar import load_references_yaml, remove_reference
+    from mixlens.io.ingest import save_references
+    import io as _io
+    import soundfile as sf
+    buf = _io.BytesIO(); sf.write(buf, np.zeros((100, 2), dtype="float32"), 44100, format="WAV")
+    save_references(tmp_path, "dream", [("a.wav", buf.getvalue()), ("b.wav", buf.getvalue())])
+    remove_reference(tmp_path, "dream/a.wav")
+    assert [e.path for e in load_references_yaml(tmp_path)] == ["dream/b.wav"] and not (tmp_path / "dream" / "a.wav").exists()

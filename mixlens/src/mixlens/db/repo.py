@@ -206,3 +206,30 @@ class Repo:
 
     def get_all_versions(self) -> pd.DataFrame:
         return self._read_sql("SELECT * FROM versions")
+
+    # -- deleting -----------------------------------------------------------
+
+    def delete_version(self, song_id: str, version: str) -> None:
+        with self.cursor() as cur:
+            cur.execute("SELECT version_id FROM versions WHERE song_id=? AND version=?", (song_id, version))
+            row = cur.fetchone()
+            if not row:
+                return
+            vid = row[0]
+            cur.execute("DELETE FROM features WHERE entity='version' AND entity_id=?", (vid,))
+            cur.execute("DELETE FROM checks WHERE version_id=?", (vid,))
+            cur.execute("DELETE FROM labels WHERE version_id=?", (vid,))
+            cur.execute("DELETE FROM versions WHERE version_id=?", (vid,))
+            cur.execute("SELECT COUNT(*) FROM versions WHERE song_id=?", (song_id,))
+            if cur.fetchone()[0] == 0:
+                cur.execute("DELETE FROM songs WHERE song_id=?", (song_id,))
+
+    def delete_ref(self, path: str) -> None:
+        """Remove a reference and its derived accompaniment row."""
+        with self.cursor() as cur:
+            for p in (path, path + "#accompaniment"):
+                cur.execute("SELECT ref_id FROM refs WHERE path=?", (p,))
+                row = cur.fetchone()
+                if row:
+                    cur.execute("DELETE FROM features WHERE entity='ref' AND entity_id=?", (row[0],))
+                    cur.execute("DELETE FROM refs WHERE ref_id=?", (row[0],))

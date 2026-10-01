@@ -47,6 +47,9 @@ def main() -> None:
     n_refs = int((~repo.list_refs()['path'].str.endswith('#accompaniment')).sum())  # derived rows don't count
     page = theme.topbar(pages, f"{n_mixes} mix{'es' if n_mixes != 1 else ''} · {n_refs} refs")
     jobs.render_banner()
+    if st.session_state.get("_last_page") != page:
+        st.session_state["_last_page"] = page
+        theme.scroll_to_top()
 
     if page == "Analyze":
         from views import analyze

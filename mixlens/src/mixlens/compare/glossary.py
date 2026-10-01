@@ -24,7 +24,7 @@ GLOSSARY: dict[str, tuple[str, str, str, str]] = {
                  "Narrower than your references in that band.", "Wider than your references in that band."),
     "corr": ("Phase correlation", "How well left and right agree in a band (+1 mono-compatible, negative = cancels).",
              "Left/right are fighting: this band may thin out in mono.", "Very mono-like in that band."),
-    "vir_med": ("Vocal-to-instrumental ratio", "How loud the vocal is over the instrumental while it's singing (LU).",
+    "vir_med": ("Vocal level vs instrumental", "How loud the vocal is over the instrumental while it's singing (LU).",
                 "Vocal sits further back than your references.", "Vocal sits more forward than your references."),
     "vir_iqr": ("Vocal level spread", "How much the vocal/instrumental balance varies.",
                 "Very steady balance.", "Balance wanders a lot across the song."),
@@ -36,10 +36,10 @@ GLOSSARY: dict[str, tuple[str, str, str, str]] = {
                   "Vocal is warm or dull in the presence range.", "Vocal has a forward, potentially harsh edge."),
     "vox_sib": ("Vocal sibilance", "Vocal 5-10 kHz energy relative to 200 Hz-1 kHz.",
                 "Soft, de-essed top.", "Sibilant: 's' sounds may be piercing, especially through bright reverb."),
-    "csi": ("Consonant survival (CSI)", "Fraction of 2-6 kHz bands where word onsets still poke above the instrumental.",
+    "csi": ("Lyric clarity (consonant survival)", "Fraction of 2-6 kHz bands where word onsets still poke above the instrumental.",
             "Consonants are masked: words lose clarity even if the vocal level seems fine.",
             "Consonants cut through clearly."),
-    "csi_p10": ("Worst-moment CSI", "CSI at the weakest 10% of word onsets.",
+    "csi_p10": ("Lyric clarity at the worst moments", "CSI at the weakest 10% of word onsets.",
                 "Some words vanish completely.", "Even the worst moments stay intelligible."),
     "mask": ("Masking depth", "How far the instrumental sits above the vocal in a band (info only).",
              "Little overlap in that band.", "Instrumental crowds the vocal in that band (some is intended)."),
@@ -51,11 +51,11 @@ GLOSSARY: dict[str, tuple[str, str, str, str]] = {
                         "Tail is darker than the vocal.", "Tail is brighter than the vocal (shimmery)."),
     "inst_decay": ("Instrumental decay", "How fast the instrumental fades after strong hits (dB/s).",
                    "Long, sustained instrumental.", "Short, dry instrumental."),
-    "space_contrast": ("Space contrast", "Instrumental decay minus vocal tail decay: how much wetter the vocal is than the instrumental.",
+    "space_contrast": ("Vocal wetness vs instrumental", "Instrumental decay minus vocal tail decay: how much wetter the vocal is than the instrumental.",
                        "Vocal and instrumental share the same space.", "Wet vocal over a dry instrumental (the target sound)."),
     "vox_attack": ("Vocal attack", "Rise of 2-8 kHz in the 10 ms after word onsets (info only).",
                    "Reverb is blurring word starts.", "Crisp word onsets."),
-    "air_ratio": ("Air", "Energy 10-16 kHz relative to 1-4 kHz.",
+    "air_ratio": ("High-end shine", "Energy 10-16 kHz relative to 1-4 kHz.",
                   "Duller top end than your references.", "Brighter, airier top end."),
     "presence_ratio": ("Presence", "Energy 4-10 kHz relative to 1-4 kHz.",
                        "Recessed upper mids.", "Forward, bright upper mids."),
@@ -93,17 +93,17 @@ GLOSSARY: dict[str, tuple[str, str, str, str]] = {
                   "Vocal gets lost on small speakers.", "Vocal dominates on small speakers."),
     "vir_mono": ("Vocal level in mono", "Vocal-to-instrumental ratio after mono fold-down.",
                  "Vocal loses level in mono.", "Vocal gains level in mono."),
-    "csi_phone": ("Consonants on a phone", "CSI after phone-speaker filtering.",
+    "csi_phone": ("Lyric clarity on a phone", "CSI after phone-speaker filtering.",
                   "Words collapse on small speakers.", "Words stay clear on small speakers."),
-    "csi_mono": ("Consonants in mono", "CSI after mono fold-down.",
+    "csi_mono": ("Lyric clarity in mono", "CSI after mono fold-down.",
                  "Words get masked in mono.", "Words stay clear in mono."),
     "vir_phone_delta": ("Phone vocal-level change", "Phone VIR minus full-range VIR.",
                         "Vocal drops back on phones.", "Vocal comes forward on phones."),
     "vir_mono_delta": ("Mono vocal-level change", "Mono VIR minus full-range VIR.",
                        "Vocal drops back in mono.", "Vocal comes forward in mono."),
-    "csi_phone_delta": ("Phone clarity change", "Phone CSI minus full-range CSI.",
+    "csi_phone_delta": ("Lyric clarity lost on a phone", "Phone CSI minus full-range CSI.",
                         "Words lose clarity on phones (below -0.15 is a problem).", "Clearer on phones than full range."),
-    "csi_mono_delta": ("Mono clarity change", "Mono CSI minus full-range CSI.",
+    "csi_mono_delta": ("Lyric clarity lost in mono", "Mono CSI minus full-range CSI.",
                        "Words lose clarity in mono.", "Clearer in mono."),
     "true_peak": ("True peak", "Highest inter-sample peak in dBTP. Above 0 will clip after conversion.",
                   "Comfortable headroom.", "At or over full scale: risk of clipping on playback/encoding."),
@@ -196,3 +196,57 @@ ACTIONS: dict[tuple[str, str], str] = {
 def action_for(feature: str, direction: str) -> str:
     base = feature[:-5] if feature.endswith("_true") and feature not in {a for a, _ in ACTIONS} else feature
     return ACTIONS.get((feature, direction)) or ACTIONS.get((base, direction), "")
+
+
+# Units for quoting values the way a producer reads them.
+UNITS: dict[str, str] = {
+    "lufs_i": "LUFS", "lra": "LU", "plr": "dB", "crest": "dB", "st_crest": "dB", "transient_ratio": "dB", "pump_depth": "dB",
+    "band_crest": "dB", "vir_med": "dB", "vir_iqr": "dB", "vir_section": "dB", "vir_phone": "dB", "vir_mono": "dB",
+    "vox_consistency": "dB", "vox_harsh": "dB", "vox_sib": "dB", "vox_crest": "dB", "vox_floor_true": "dB", "mask": "dB",
+    "vox_tail_level": "dB", "vox_tail_decay": "dB/s", "inst_decay": "dB/s", "space_contrast": "dB/s", "vox_tail_bright": "oct",
+    "air_ratio": "dB", "presence_ratio": "dB", "side_mid_air": "dB", "vox_air_ratio": "dB", "hf_density": "dB", "side_mid": "dB",
+    "ltas": "dB", "wet_dry_true": "dB", "duck_depth_true": "dB", "predelay_true": "ms", "wet_bright_true": "oct",
+    "true_peak": "dBTP", "vir_phone_delta": "dB", "vir_mono_delta": "dB",
+}
+PERCENT = {"csi", "csi_p10", "csi_phone", "csi_mono", "csi_wash_drop_true", "csi_phone_delta", "csi_mono_delta", "flat_top_ratio"}
+
+
+def format_value(feature: str, value: float) -> str:
+    """'-16.1 LUFS', '62%', ... so numbers always carry their unit."""
+    base = feature[:-5] if feature.endswith("_true") and feature not in UNITS else feature
+    if base in PERCENT or feature in PERCENT:
+        return f"{value * 100:.0f}%"
+    unit = UNITS.get(feature) or UNITS.get(base, "")
+    return f"{value:.1f} {unit}".strip()
+
+
+ACTIONS.update({
+    ("side_mid", "low"): "The stereo image is narrower than your references. Try a stereo widener or short stereo delays on pads and synths, and keep bass and kick centred.",
+    ("side_mid", "high"): "Wider than your references. Narrow the widest layers, and keep everything below ~120 Hz in mono so it holds up on club systems and phones.",
+    ("corr", "low"): "Left and right are working against each other here. Check the mix in mono and pull back wideners, chorus or detuned layers.",
+    ("band_crest", "low"): "That frequency range is squashed. Check multiband compression or OTT on the bus, and lower its depth.",
+    ("band_crest", "high"): "That range is more dynamic than your references. A little compression on the elements living there would even it out.",
+    ("presence_ratio", "low"): "The upper mids are recessed. Try +1-2 dB around 5-8 kHz on the mix bus or on the lead.",
+    ("presence_ratio", "high"): "Forward, bright upper mids. A 1-2 dB dip around 5-8 kHz on the bus will smooth it.",
+    ("lra", "low"): "Very even loudness from section to section. Automate more contrast, such as quieter verses and bigger hooks.",
+    ("lra", "high"): "Big loudness swings between sections. Even them out with bus automation or compression.",
+    ("crest", "high"): "More dynamic than your references. A touch more bus compression or limiting would tighten it.",
+    ("vox_tail_level", "low"): "Dry vocal tail compared with your references. Raise the reverb return if you want more space.",
+    ("vox_tail_decay", "low"): "The vocal tail dies quickly. Lengthen the reverb decay if you want it to linger.",
+    ("side_mid_air", "high"): "The highs are very wide. Pull back stereo wideners and bright stereo effects so the top end holds up in mono.",
+    ("hf_density", "low"): "A very dense, compressed top end. Fine if intentional; otherwise back off saturation or OTT on bright elements.",
+})
+for _k in [("ltas", "low"), ("ltas", "high")]:
+    pass
+
+
+def band_action(band: str, direction: str) -> str:
+    """EQ move for a tonal-balance band like '1000.0Hz'."""
+    try:
+        hz = float(band.replace("Hz", ""))
+    except ValueError:
+        return ""
+    label = f"{hz / 1000:.1f} kHz".replace(".0 kHz", " kHz") if hz >= 1000 else f"{hz:.0f} Hz"
+    if direction == "high":
+        return f"There's more energy around {label} than in your references. Try a gentle 1-3 dB cut there (a wide dynamic EQ band works well), or check which element is piling up."
+    return f"There's less energy around {label} than in your references. Try a gentle 1-3 dB boost there, or look for an element that could fill it."

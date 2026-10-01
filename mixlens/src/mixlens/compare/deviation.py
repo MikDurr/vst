@@ -17,6 +17,8 @@ class DeviationResult:
     z: float
     level: str  # "ok" | "watch" | "flag"
     direction: str  # "low" | "high" | "ok"
+    ref_low: float | None = None   # the references' p10
+    ref_high: float | None = None  # and p90, so messages can say what is normal
 
 
 def robust_z(value: float, envelope: Envelope) -> float:
@@ -44,7 +46,8 @@ def evaluate(value: float, envelope: Envelope, cfg: Config) -> DeviationResult:
     z = robust_z(value, envelope)
     level = classify_level(value, envelope, cfg)
     direction = "ok" if level == "ok" else ("high" if z > 0 else "low")
-    return DeviationResult(feature=envelope.feature, band=envelope.band, value=value, z=z, level=level, direction=direction)
+    return DeviationResult(feature=envelope.feature, band=envelope.band, value=value, z=z, level=level, direction=direction,
+                           ref_low=envelope.p10, ref_high=envelope.p90)
 
 
 def evaluate_all(values: dict[tuple[str, str], float], envelopes: dict[tuple[str, str], Envelope], cfg: Config) -> list[DeviationResult]:

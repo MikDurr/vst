@@ -110,3 +110,13 @@ def update_reference_meta(references_dir: str | Path, path: str, artist: str, ti
         if row["path"] == path:
             row.update({"artist": artist, "title": title, "note": note})
     refs_yaml_path.write_text(yaml.dump(data, sort_keys=False, allow_unicode=True))
+
+
+def remove_reference(references_dir: str | Path, path: str, delete_file: bool = True) -> None:
+    """Drop one reference from references.yaml (and its copied audio file)."""
+    references_dir = Path(references_dir)
+    yml = references_dir / "references.yaml"
+    data = yaml.safe_load(yml.read_text()) or []
+    yml.write_text(yaml.dump([r for r in data if r["path"] != path], sort_keys=False, allow_unicode=True))
+    if delete_file:
+        (references_dir / path).unlink(missing_ok=True)

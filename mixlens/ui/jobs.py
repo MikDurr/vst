@@ -24,6 +24,7 @@ class Job:
     status: str = "running"   # running | done | error
     detail: str = ""
     error: str = ""
+    done_label: str = ""
     started: float = field(default_factory=time.time)
     finished: float | None = None
 
@@ -34,9 +35,10 @@ def _registry() -> dict:
     return {"jobs": {}, "lock": threading.Lock(), "pool": ThreadPoolExecutor(max_workers=1)}
 
 
-def submit(kind: str, label: str, fn: Callable[[], str], song: str | None = None, version: str | None = None) -> Job:
+def submit(kind: str, label: str, fn: Callable[[], str], song: str | None = None, version: str | None = None,
+           done_label: str = "") -> Job:
     reg = _registry()
-    job = Job(id=uuid.uuid4().hex[:8], kind=kind, label=label, song=song, version=version)
+    job = Job(id=uuid.uuid4().hex[:8], kind=kind, label=label, song=song, version=version, done_label=done_label)
     with reg["lock"]:
         reg["jobs"][job.id] = job
 
@@ -100,14 +102,16 @@ def render_banner() -> None:
         now_running = bool(running())
         if active and not now_running:
             st.rerun()  # last job just finished: leave polling mode and refresh the page
+        finished = [j for j in all_jobs() if j.status != "running" and j.id not in dismissed]
+        stale = {j.id for j in finished[:-1]}  # only the newest finished job gets a banner
         for job in all_jobs():
-            if job.id in dismissed:
+            if job.id in dismissed or job.id in stale:
                 continue
             if job.status == "running":
                 theme.job_card("running", job.label, f"Running for {_fmt(time.time() - job.started)}. "
                                "You can keep using the app; it carries on in the background.")
             elif job.status == "done":
-                theme.job_card("done", job.label, job.detail or "Finished.")
+                theme.job_card("done", job.done_label or job.label, job.detail or "Finished.")
                 c1, c2, _ = st.columns([1.2, 1, 6])
                 if c1.button("See results", key=f"jr_{job.id}", type="primary"):
                     _see_results(job)

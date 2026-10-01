@@ -37,7 +37,8 @@ def render(repo, cfg) -> None:
         v_opts = sorted(song_versions["version"].unique())
         widgets.guard("reg_version", v_opts)
         version = st.selectbox("Version", v_opts, key="reg_version")
-        rating = st.radio("Rating", ["held_up", "neutral", "regret"], horizontal=True, key="reg_rating")
+        rating = st.radio("How do you feel about it now?", ["held_up", "neutral", "regret"], horizontal=True, key="reg_rating",
+                          format_func=lambda r: {"held_up": "Still happy with it", "neutral": "Neutral", "regret": "Wish I'd redone it"}[r])
         tag = st.text_input("Tag", key="reg_tag")
         note = st.text_area("Note", key="reg_note")
         if st.button("Save label"):
@@ -47,7 +48,7 @@ def render(repo, cfg) -> None:
     else:
         st.info("No analyzed versions yet.")
 
-    st.subheader("Effect-size ranking")
+    st.subheader("What separates the mixes you regret")
     labels_df = repo.get_labels()
     features_df = repo.get_features(entity="version")
     try:

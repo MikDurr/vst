@@ -8,7 +8,7 @@ import widgets
 
 import theme
 
-from mixlens.compare.glossary import feature_name, trend_note, what_it_measures
+from mixlens.compare.glossary import feature_name, format_value, trend_note, what_it_measures
 
 from plots import history_line_figure
 
@@ -66,13 +66,14 @@ def render(repo, cfg) -> None:
         if feature not in df["feature"].values:
             continue
         with cols[i % 2]:
-            st.plotly_chart(history_line_figure(df, feature), use_container_width=True)
             sub = df[df["feature"] == feature]["value"].tolist()
-            st.caption(f"**{feature_name(feature)}**: {what_it_measures(feature)}")
             if len(sub) >= 2:
+                st.plotly_chart(history_line_figure(df, feature), use_container_width=True)
+                st.caption(f"**{feature_name(feature)}**: {what_it_measures(feature)}")
                 st.caption(trend_note(feature, sub[0], sub[-1]))
-            else:
-                st.caption("Analyze another version to see a trend.")
+            else:  # one point is not a trend: show the number, not an empty chart
+                theme.stat_tile(format_value(feature, sub[0]), feature_name(feature),
+                                what_it_measures(feature) + " Analyze another version to see how it changes.")
 
     _render_diff(repo, song, song_versions)
 

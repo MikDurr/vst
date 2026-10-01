@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from mixlens.compare.deviation import DeviationResult
-from mixlens.compare.glossary import action_for, explain, feature_name
+from mixlens.compare.glossary import action_for, band_action, explain, feature_name, format_value
 
 FIX, CHECK, NOTE = "fix", "check", "note"
 _ORDER = {FIX: 0, CHECK: 1, NOTE: 2}
@@ -91,7 +91,16 @@ def _sanity(f: dict[tuple[str, str], float]) -> list[Recommendation]:
     return recs
 
 
-def _deviations(results: list[DeviationResult], hints: list[dict], rules: dict[str, dict]) -> list[Recommendation]:
+def _range(feature: str, r: DeviationResult) -> str:
+    """'you -16.1 LUFS, your references -12.0 to -9.0 LUFS': numbers a producer can use."""
+    mine = f"you {format_value(feature, r.value)}"
+    if r.ref_low is None or r.ref_high is None:
+        return mine
+    lo, hi = format_value(feature, r.ref_low), format_value(feature, r.ref_high)
+    return f"{mine}; your references {lo}" if lo == hi else f"{mine}; your references {lo} to {hi}"
+
+
+def _deviations(results: list[DeviationResult], hints: list[dict], rules: dict[str, dict]) -> tuple[list[Recommendation], set[str]]:
     recs: list[Recommendation] = []
     by_feature = {r.feature: r for r in results}
     covered: set[str] = set()
@@ -100,24 +109,30 @@ def _deviations(results: list[DeviationResult], hints: list[dict], rules: dict[s
         feats = [c["feature"] for c in conds]
         covered.update(feats)
         ev = "; ".join(
-            f"{feature_name(c['feature'])} {c['direction']} (z {by_feature[c['feature']].z:+.1f})"
+            f"{feature_name(c['feature'])}: {_range(c['feature'], by_feature[c['feature']])}"
             for c in conds if c["feature"] in by_feature and c["direction"] in ("low", "high")
         )
         worst = max((by_feature[f].level for f in feats if f in by_feature), key=lambda l: l == "flag", default="watch")
-        recs.append(Recommendation(FIX if worst == "flag" else CHECK, h["message"].split(".")[0], "Flagged against your references.",
-                                   h["message"], ev))
+        sentences = [s.strip() for s in h["message"].split(". ") if s.strip()]
+        first = conds[0] if conds else {}
+        concrete = action_for(first.get("feature", ""), first.get("direction", "").replace("_abs", "")) if first else ""
+        # a hint's own text is 'diagnosis. what to do'; with no second sentence, use the curated move for it
+        action = ". ".join(sentences[1:]) if len(sentences) > 1 else (concrete or h["message"])
+        recs.append(Recommendation(FIX if worst == "flag" else CHECK, sentences[0].rstrip("."),
+                                   "This measurement is outside what your references do.", action, ev))
     flagged = sorted((r for r in results if r.level != "ok" and r.feature not in covered), key=lambda r: -abs(r.z))
     for r in flagged[:6]:
-        name = feature_name(r.feature) + (f" ({r.band})" if r.band else "")
-        action = action_for(r.feature, r.direction)
+        name = feature_name(r.feature) + (f" ({r.band.replace('Hz', ' Hz')})" if r.band else "")
+        action = band_action(r.band, r.direction) if r.feature == "ltas" else action_for(r.feature, r.direction)
+        how = "much " if abs(r.z) > 4 else ""
         recs.append(Recommendation(
             FIX if r.level == "flag" else CHECK,
-            f"{name} is {r.direction} versus your references",
+            f"{name} is {how}{r.direction}er than your references" if r.direction in ("low", "high") else name,
             explain(r.feature, r.direction) or "Outside the range your references cover.",
-            action or "Listen to this one against a reference and decide if the difference is intentional.",
-            f"value {r.value:.2f}, z {r.z:+.1f}",
+            action or "Compare this with a reference in solo and adjust the elements that live here if the difference isn't intentional.",
+            _range(r.feature, r),
         ))
-    return recs
+    return recs, covered
 
 
 def recommend(
@@ -128,14 +143,20 @@ def recommend(
     rules: dict[str, dict],
     has_reference_range: bool,
 ) -> list[Recommendation]:
-    recs = _safety(checks) + _sanity(features)
+    recs = _safety(checks)
+    covered: set[str] = set()
+    deviation_recs: list[Recommendation] = []
     if has_reference_range:
-        recs += _deviations(results, hints, rules)
-    else:
+        deviation_recs, covered = _deviations(results, hints, rules)
+    # reference-based hints already cover some sanity checks (e.g. reverb ducking): don't say it twice
+    topic = {"The vocal reverb doesn't duck": "duck_depth_true", "Words get lost on small speakers": "csi_phone_delta"}
+    recs += [r for r in _sanity(features) if topic.get(r.title) not in covered]
+    recs += deviation_recs
+    if not has_reference_range:
         recs.append(Recommendation(NOTE, "Add references to unlock comparisons",
             "Everything above works without references. To see how the mix sits against the sound you're aiming for, "
             "add reference songs for this style on the References page.",
-            "Open References, add 8-20 songs you love the mix of, and click Analyze references."))
+            "Open References, add 8-20 songs you love the mix of, and click Measure references."))
     seen: set[str] = set()
     unique = [r for r in recs if not (r.title in seen or seen.add(r.title))]
     return sorted(unique, key=lambda r: _ORDER[r.severity])

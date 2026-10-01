@@ -54,3 +54,24 @@ def test_fixes_sort_before_checks_before_notes():
     )
     sev = [r.severity for r in recs]
     assert sev == sorted(sev, key=["fix", "check", "note"].index)
+
+
+def test_advice_quotes_units_and_the_reference_range_without_z_scores():
+    results = [DeviationResult("lufs_i", "", -16.1, -8.5, "flag", "low", ref_low=-12.0, ref_high=-9.0)]
+    recs = recommend(None, {}, results, [], {}, True)
+    r = next(x for x in recs if "loud" in x.title.lower())
+    assert "-16.1 LUFS" in r.evidence and "-12.0 LUFS to -9.0 LUFS" in r.evidence and "z" not in r.evidence.replace("references", "")
+
+
+def test_a_hint_and_its_sanity_twin_appear_once():
+    f = {("duck_depth_true", ""): -1.0}
+    results = [DeviationResult("duck_depth_true", "", -1.0, 0.0, "ok", "ok")]
+    rules = {"duck": {"id": "duck", "conditions": [{"feature": "duck_depth_true", "direction": "low_abs"}], "message": "Reverb isn't ducking under the dry vocal. Add sidechain."}}
+    recs = recommend(None, f, results, [{"id": "duck", "message": rules["duck"]["message"]}], rules, True)
+    assert sum("duck" in r.title.lower() or "duck" in r.action.lower() for r in recs) == 1
+
+
+def test_tonal_band_advice_names_the_frequency_and_the_move():
+    results = [DeviationResult("ltas", "250.0Hz", 6.0, 3.0, "flag", "high", ref_low=0.0, ref_high=3.0)]
+    r = recommend(None, {}, results, [], {}, True)[0]
+    assert "250 Hz" in r.action and "cut" in r.action

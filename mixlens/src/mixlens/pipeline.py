@@ -131,6 +131,7 @@ def build_style_envelopes(repo: Repo, style: str) -> dict[str, int]:
     for key in (style, style + INSTRUMENTAL_SUFFIX):
         df = repo.get_features_for_style(key, entity="ref")
         if df.empty:
+            repo.replace_envelopes(key, [])  # last reference removed: don't keep a stale range
             continue
         envelopes = build_envelopes(df)
         repo.replace_envelopes(key, envelopes)

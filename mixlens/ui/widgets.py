@@ -115,7 +115,7 @@ def file_source(key: str, accept_multiple: bool = True, label: str = "Files") ->
     mode = st.radio(
         "Where are the files?", ["Upload them here", "Pick a folder on this Mac"],
         horizontal=True, key=f"{key}_mode",
-        help="Picking a folder is fastest for big bounces: nothing is uploaded through the browser.",
+        help="Picking a folder is fastest for big bounces and needs no uploading. If dragging files from Finder doesn't work in this window, use it, or open the app in Chrome or Safari.",
     )
     if mode.startswith("Pick"):
         c1, c2 = st.columns([1, 3], vertical_alignment="bottom")
@@ -132,7 +132,6 @@ def file_source(key: str, accept_multiple: bool = True, label: str = "Files") ->
     files = st.file_uploader(
         label, type=AUDIO_TYPES, accept_multiple_files=accept_multiple, key=f"{key}_files",
     )
-    st.caption("Dragging from Finder not working in this window? Use \"Pick a folder on this Mac\" above, or open this app in Chrome or Safari.")
     uploaded = files if isinstance(files, list) else ([files] if files else [])
     if uploaded:
         st.session_state[cache_key] = {f.name: f.getvalue() for f in uploaded}

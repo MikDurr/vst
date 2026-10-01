@@ -5,7 +5,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 import theme
-from mixlens.compare.glossary import feature_name
+from mixlens.compare.glossary import UNITS, feature_name
 
 
 def ltas_vs_envelope_figure(version_ltas: pd.DataFrame, envelope_df: pd.DataFrame) -> go.Figure:
@@ -64,7 +64,8 @@ def history_line_figure(df: pd.DataFrame, feature: str) -> go.Figure:
     sub = df[df["feature"] == feature]
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=sub["version"], y=sub["value"], mode="lines+markers", name=feature, line=dict(color=theme.LIME, width=4), marker=dict(size=11, color=theme.CYAN, line=dict(color=theme.BG, width=2))))
-    fig.update_layout(title=feature_name(feature), xaxis_title="version", yaxis_title=feature)
+    unit = UNITS.get(feature, "")
+    fig.update_layout(title=feature_name(feature), xaxis_title="version", yaxis_title=f"{feature_name(feature)}" + (f" ({unit})" if unit else ""))
     return theme.style_figure(fig)
 
 

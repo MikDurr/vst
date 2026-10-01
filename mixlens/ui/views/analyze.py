@@ -17,6 +17,16 @@ from mixlens.io.stems import STEM_NAMES
 from mixlens.pipeline import analyze_version, recommendations_for, reference_range_key, run_checks_only
 
 
+ROLE_LABELS = {
+    "(ignore)": "Not part of this song", "mix": "Full mix", "vox_dry": "Vocal, dry (no reverb/delay)",
+    "vox_wet": "Vocal effects only (reverb/delay)", "inst": "Instrumental", "vox_full": "Vocal with effects",
+}
+CHECK_NAMES = {
+    "clip_runs": "Clipped samples", "true_peak": "True peak (dBTP)",
+    "isp_overs": "Peaks over 0 dBTP between samples", "stem_headroom": "Stem peak level (dBFS)",
+}
+
+
 def _discover_songs(project_root: Path) -> dict[str, Path]:
     mixes_dir = project_root / "mixes"
     if not mixes_dir.exists():
@@ -110,7 +120,8 @@ def _start_analysis(repo, cfg, project_root: Path, song_dir: Path, song: str, ve
         n_check = sum(r.severity == "check" for r in recs)
         return f"{n_fix} thing{'s' if n_fix != 1 else ''} to fix, {n_check} to take a look at."
 
-    jobs.submit("analyze", f"Analyzing {song} {version}", run, song=song, version=version)
+    jobs.submit("analyze", f"Analyzing {song} {version}", run, song=song, version=version,
+                done_label=f"{song} {version} is analyzed")
 
 
 def render(repo, cfg, project_root: Path) -> None:
@@ -146,11 +157,9 @@ def _render_add(repo, cfg, project_root: Path, songs: dict[str, Path]) -> None:
 
     # ---- files ----
     st.markdown("##### The bounces")
-    c_help1, c_help2 = st.columns(2)
-    with c_help1:
+    with st.container(key="help"):
         with st.expander("What are the four stems?"):
             st.markdown(STEMS_HELP)
-    with c_help2:
         with st.expander("How to export them from Logic Pro"):
             st.markdown(LOGIC_HELP)
     for w in st.session_state.pop("derive_warnings", []):
@@ -195,9 +204,10 @@ def _render_add(repo, cfg, project_root: Path, songs: dict[str, Path]) -> None:
         cols = st.columns(min(len(names), 4))
         for i, name in enumerate(names):
             g = guesses[name]
-            picked = cols[i % len(cols)].selectbox(
-                name, slots, index=slots.index(g) if g in slots else 0, key=f"up_assign_{name}_{int(instrumental)}"
-            )
+            akey = f"up_assign_{name}_{int(instrumental)}"
+            widgets.guard(akey, slots)
+            st.session_state.setdefault(akey, g if g in slots else "(ignore)")
+            picked = cols[i % len(cols)].selectbox(name, slots, key=akey, format_func=lambda s: ROLE_LABELS.get(s, s))
             if picked != "(ignore)":
                 assignment[picked] = name
 
@@ -216,6 +226,8 @@ def _render_add(repo, cfg, project_root: Path, songs: dict[str, Path]) -> None:
 
     # ---- which song ----
     st.markdown("##### Which song is this?")
+    if parsed:
+        st.caption(f"From your file names we picked the song '{parsed[0]}' and version '{parsed[1]}'. Change them below if that's wrong.")
     options = ["Add to an existing song", "Start a new song"] if songs else ["Start a new song"]
     if st.session_state.get("up_song_mode") not in options:
         st.session_state["up_song_mode"] = options[-1]
@@ -235,7 +247,7 @@ def _render_add(repo, cfg, project_root: Path, songs: dict[str, Path]) -> None:
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
         style = widgets.style_picker(
-            "Style", "up_style", cfg, repo, project_root,
+            "Genre / sound", "up_style", cfg, repo, project_root,
             help="The reference library this song is compared against. References belong to a style, not a song: "
                  "every song with the same style shares the same references.",
         )
@@ -248,17 +260,24 @@ def _render_add(repo, cfg, project_root: Path, songs: dict[str, Path]) -> None:
         with st.expander("Song sections (optional)"):
             st.caption("Start/end seconds of each section. Adds a per-section vocal level.")
             sections_df = st.data_editor(
-                pd.DataFrame({"section": ["verse1", "hook1"], "start": [0.0, 0.0], "end": [0.0, 0.0]}),
+                pd.DataFrame({"section": pd.Series([], dtype=str), "start": pd.Series([], dtype=float), "end": pd.Series([], dtype=float)}),
                 num_rows="dynamic", use_container_width=True, key="up_sections_editor",
             )
 
     # ---- go ----
-    ready = bool(names) and not dupes and not missing and bool(name) and bool(version.strip())
+    clash = bool(name and version.strip()) and (project_root / "mixes" / name / f"{name}__{version.strip()}__mix.wav").exists()
+    replace_ok = True
+    if clash:
+        st.warning(f"{name} {version.strip()} already exists. Pick a new version name, or tick the box to replace it.")
+        replace_ok = st.checkbox(f"Replace {name} {version.strip()} with these files", key="up_replace")
+    ready = bool(names) and not dupes and not missing and bool(name) and bool(version.strip()) and replace_ok
     b1, b2 = st.columns(2)
     save_only = b1.button("Save only", disabled=not ready, use_container_width=True)
     go = b2.button("Save and analyze", type="primary", disabled=not ready, use_container_width=True)
     if not ready:
-        st.caption("Add the files above and name the song to enable these.")
+        why = ("Add all the files" if (not names or missing) else "Two files share a role" if dupes else
+               "Name the song" if not name else "Tick the box above to replace the existing version" if not replace_ok else "Give it a version name")
+        st.caption(f"{why} to enable these buttons.")
     if not (save_only or go):
         return
 
@@ -289,6 +308,7 @@ def _render_add(repo, cfg, project_root: Path, songs: dict[str, Path]) -> None:
         st.toast(f"Saved {name} {version}.")
     st.session_state["_up_pending"] = {
         "up_song_mode": "Add to an existing song", "up_song_pick": name, "_up_last_pick": None,
+        "up_src_folder": "", "up_replace": False,
     }
     st.session_state.pop("_up_src_cache", None)
     st.rerun()
@@ -304,7 +324,7 @@ def _render_library(repo, cfg, project_root: Path, songs: dict[str, Path]) -> No
         info = load_song_yaml(song_dir)
         tags = f"{info.style} · {info.bpm:g} BPM" + (" · instrumental" if info.instrumental else "")
         for version in reversed(_versions(song_dir)):
-            c1, c2, c3, c4 = st.columns([3, 1.5, 1.4, 1.4], vertical_alignment="center")
+            c1, c2, c3, c4, c5 = st.columns([3, 1.4, 1.3, 1.3, .6], vertical_alignment="center")
             c1.markdown(f"**{song}** {version}  \n<span style='color:#E3D2F7;font-size:.9rem'>{tags}</span>", unsafe_allow_html=True)
             busy = jobs.is_running("analyze", song, version)
             done = (song, version) in analyzed
@@ -319,6 +339,11 @@ def _render_library(repo, cfg, project_root: Path, songs: dict[str, Path]) -> No
                 st.session_state["nav_target"] = "Compare"
                 st.session_state["cmp_song"], st.session_state["cmp_version"] = song, version
                 st.rerun()
+            with c5.popover("⋯", use_container_width=True):
+                st.caption(f"Delete {song} {version} and its results? This removes the saved audio files.")
+                if st.button("Delete this version", key=f"lib_d_{song}_{version}"):
+                    _delete_version(repo, song_dir, song, version)
+                    st.rerun()
 
     with st.expander("Quick peak check (no analysis)"):
         widgets.guard("up_peak_song", songs)
@@ -335,11 +360,23 @@ def _render_library(repo, cfg, project_root: Path, songs: dict[str, Path]) -> No
 
 
 def _render_check_results(results) -> None:
-    df = pd.DataFrame([{"check": r.check, "level": r.level, "value": r.value, "bar": r.bar, "stem": r.stem} for r in results])
+    df = pd.DataFrame([{"check": CHECK_NAMES.get(r.check, r.check), "result": r.level, "value": round(r.value, 2), "where": (f"bar {r.bar:.0f}" if r.bar is not None else r.stem)} for r in results])
     st.dataframe(df, use_container_width=True, hide_index=True)
     if any_fail(results):
         st.error("Peak safety: at least one FAIL.")
-    elif (df["level"] == "warn").any():
+    elif (df["result"] == "warn").any():
         st.warning("Peak safety: warnings present, no fails.")
     else:
         st.success("Peak safety: all checks pass.")
+
+
+def _delete_version(repo, song_dir: Path, song: str, version: str) -> None:
+    for f in song_dir.glob(f"{song}__{version}__*.wav"):
+        f.unlink(missing_ok=True)
+    repo.delete_version(song, version)
+    if not _versions(song_dir):  # last version gone: remove the song too
+        (song_dir / "song.yaml").unlink(missing_ok=True)
+        try:
+            song_dir.rmdir()
+        except OSError:
+            pass
