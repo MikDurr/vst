@@ -189,6 +189,20 @@ h1, h2, h3, h4, h5, .hero {{ scroll-margin-top: 90px; }}
 .tile {{ background: {PANEL}; border: 1px solid var(--line); border-radius: 20px; padding: 1.2rem 1.4rem; height: 100%; }}
 .tile .big {{ font-size: 2.4rem; font-weight: 900; letter-spacing: -.03em; color: {LIME}; line-height: 1.1; }}
 .tile .name {{ font-weight: 800; color: #fff; margin-top: .3rem; }} .tile p {{ margin: .35rem 0 0; color: #D8C3F0; font-size: .95rem; }}
+/* ---- dynamics gauge ---- */
+.dyn {{ background: {PANEL}; border: 1px solid var(--line); border-radius: 24px; padding: 1.5rem 1.7rem; margin: .6rem 0 1rem;
+        box-shadow: 0 14px 30px -18px rgba(0,0,0,.6); }}
+.dyn .verdict {{ font-size: 2.6rem; font-weight: 900; letter-spacing: -.035em; color: {LIME}; line-height: 1; }}
+.dyn .head {{ font-size: 1.1rem; color: #fff; margin: .5rem 0 1.1rem; }}
+.gauge {{ position: relative; margin: 1.6rem 0 .4rem; }}
+.gauge .track {{ display: flex; height: 16px; border-radius: 999px; overflow: hidden; }}
+.gauge .track i {{ display: block; height: 100%; }}
+.gauge .marker {{ position: absolute; top: -7px; width: 30px; height: 30px; margin-left: -15px; border-radius: 50%;
+                  background: {LIME}; border: 4px solid {BG_DEEP}; box-shadow: 0 4px 10px rgba(0,0,0,.45); transition: left .6s var(--ease); }}
+.gauge .ends {{ display: flex; justify-content: space-between; margin-top: .55rem; font-size: .85rem; font-weight: 700; color: #D8C3F0; }}
+.dyn ul {{ margin: .9rem 0 .2rem 1.1rem; padding: 0; color: #E3D2F7; }} .dyn li {{ margin: .2rem 0; font-size: .98rem; }}
+.dyn .try {{ color: {LIME}; font-weight: 700; margin: .9rem 0 0; font-size: 1.04rem; }}
+.dyn .basis {{ font-size: .88rem; color: #CDB4EA; margin-top: .6rem; }}
 /* ---- alerts ---- */
 [data-testid="stAlertContainer"] {{ background: transparent !important; border-radius: 16px; }}
 [data-testid="stAlert"] {{ border-radius: 16px; border: 1px solid transparent; padding: .35rem .4rem; }}
@@ -356,4 +370,28 @@ def scroll_to_top() -> None:
     components.html(
         "<script>const m=window.parent.document.querySelector('[data-testid=stMain]');if(m)m.scrollTo(0,0);</script>",
         height=0,
+    )
+
+
+# gauge zone colours, squashed -> very open
+_ZONES = ["#FF8A8A", "#FFC46B", "#2BD67B", "#1CF3F3", "#8EC7FF"]
+
+
+def dynamics_card(summary, cuts: tuple[float, float, float, float], lo: float, hi: float) -> None:
+    """The verdict, a gauge placing the mix between squashed and open, and why.
+    `cuts`/`lo`/`hi` give the zone boundaries on the gauge's own scale."""
+    edges = [lo, *cuts, hi]
+    widths = [(edges[i + 1] - edges[i]) / (hi - lo) * 100 for i in range(5)]
+    segs = "".join(f'<i style="width:{w:.1f}%;background:{c}"></i>' for w, c in zip(widths, _ZONES))
+    bullets = "".join(f"<li>{html.escape(d)}</li>" for d in summary.drivers)
+    basis = ("Compared with your references." if summary.basis == "references"
+             else "Rule of thumb: add references for a real comparison.")
+    st.markdown(
+        f'<div class="dyn"><div class="verdict">{html.escape(summary.label)}</div>'
+        f'<div class="head">{html.escape(summary.headline.split(": ", 1)[-1])}</div>'
+        f'<div class="gauge"><div class="track">{segs}</div><span class="marker" style="left:{summary.position * 100:.1f}%"></span>'
+        f'<div class="ends"><span>Squashed</span><span>Balanced</span><span>Open</span></div></div>'
+        f"<ul>{bullets}</ul><p class=\"try\">Try: {html.escape(summary.advice)}</p>"
+        f'<div class="basis">{html.escape(basis)}</div></div>',
+        unsafe_allow_html=True,
     )

@@ -112,3 +112,20 @@ def extract_vox_floor_true(stems: StemSet, cfg: Config) -> list[FeatureRow]:
     if len(gap_levels) == 0 or len(active_levels) == 0:
         return [FeatureRow(feature="vox_floor_true", value=0.0)]
     return [FeatureRow(feature="vox_floor_true", value=float(np.median(gap_levels) - np.median(active_levels)))]
+
+
+def extract_section_dynamics(mix: np.ndarray, sr: int, cfg: Config, sections: dict[str, tuple[float, float]]) -> list[FeatureRow]:
+    """Micro-dynamics and loudness for each song section (needs sections in song.yaml),
+    so a limiter that crushes the hook harder than the verse can be seen."""
+    from mixlens.dsp.loudness import integrated_lufs
+
+    window_ms = cfg.get("microdynamics.window_ms", 50.0)
+    mono = to_mono(mix)
+    rows: list[FeatureRow] = []
+    for name, (start, end) in sections.items():
+        a, b = int(max(start, 0) * sr), min(int(end * sr), mono.shape[0])
+        if b - a < int(0.4 * sr):
+            continue  # too short to measure loudness
+        rows.append(FeatureRow("st_crest_section", windowed_crest_db(mono[a:b], sr, window_ms), band=name))
+        rows.append(FeatureRow("lufs_section", integrated_lufs(mix[:, a:b], sr), band=name))
+    return rows

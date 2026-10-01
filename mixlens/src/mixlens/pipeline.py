@@ -9,6 +9,7 @@ from mixlens.checks.peaks import flat_top_ratio, run_peak_checks
 from mixlens.compare.deviation import DeviationResult, evaluate, match_hints
 from mixlens.config import Config
 from mixlens.db.repo import Repo
+from mixlens.features.microdynamics import extract_section_dynamics
 from mixlens.features.registry import extract_all, extract_vocal_inst_pair, extract_whole_mix
 from mixlens.io.loader import audio_hash, load_wav, stems_hash
 from mixlens.io.separate import separate_array
@@ -73,6 +74,7 @@ def analyze_version(
         # No vocal anywhere: only whole-mix measurements apply, and there's
         # nothing for Demucs to separate.
         feature_rows = extract_whole_mix(stems.mix, stems.sr, cfg)
+        feature_rows += extract_section_dynamics(stems.mix, stems.sr, cfg, song.sections)
     else:
         demucs_cache = cache_root / DEMUCS_CACHE_DIRNAME
         vocal_demucs, inst_demucs = _demucs_split(stems.mix, stems.sr, demucs_cache, f"{song.song}__{version}__mix")
@@ -80,6 +82,8 @@ def analyze_version(
             stems, cfg, vocal_demucs=vocal_demucs, inst_demucs=inst_demucs, sections=song.sections
         )
     flat_top = flat_top_ratio(stems.mix, cfg)
+    if not song.instrumental:
+        feature_rows += extract_section_dynamics(stems.mix, stems.sr, cfg, song.sections)
     feature_rows = feature_rows + [FeatureRow(feature="flat_top_ratio", value=flat_top)]
 
     repo.insert_features("version", version_id, feature_rows)

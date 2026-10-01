@@ -5,7 +5,8 @@ import pandas as pd
 import streamlit as st
 
 import theme
-from mixlens.compare.glossary import explain, feature_name, format_value, what_it_measures
+from mixlens.compare.glossary import ACTIONS, explain, feature_name, format_value, what_it_measures
+from mixlens.compare.dynamics import PLR_CUTS, Z_CUTS, summarize_dynamics
 from mixlens.pipeline import recommendations_for, reference_range_key
 from plots import ltas_vs_envelope_figure, space_sheen_scatter
 
@@ -50,6 +51,7 @@ def render(repo, cfg) -> None:
     recs, results, has_range = recommendations_for(repo, cfg, version_id, range_key)
 
     _render_safety(repo.get_checks(version_id))
+    _render_dynamics(repo, version_id, range_key)
 
     # ---- what to do next ----
     st.subheader("What to do next")
@@ -150,3 +152,45 @@ def _render_safety(checks: pd.DataFrame) -> None:
         parts.append("clipping found" if clip["level"] == "fail" else "no clipping")
     chip = {"ok": ("ok", "Peaks safe"), "warn": ("check", "Peaks close to the limit"), "fail": ("fix", "Peak problem")}[state]
     st.markdown(f'<p class="summary-line"><span class="chip {chip[0]}">{chip[1]}</span> &nbsp;{" · ".join(parts)}</p>', unsafe_allow_html=True)
+
+
+def _render_dynamics(repo, version_id: int, range_key: str) -> None:
+    """How compressed is it? One verdict, a gauge, then the measurements behind it."""
+    feats = repo.get_features(entity="version", entity_id=version_id)
+    values = {(r["feature"], r["band"]): float(r["value"]) for _i, r in feats.iterrows()}
+    summary = summarize_dynamics(values, repo.get_envelopes(range_key))
+    if summary is None:
+        return
+    st.subheader("Dynamics")
+    st.caption("How compressed the mix is. Compression can't be read off the audio directly, so this looks at its "
+               "effects: flattened short-term dynamics, peaks pinned to the average, lost punch and pumping.")
+    if summary.basis == "references":
+        theme.dynamics_card(summary, Z_CUTS, -3.0, 3.0)
+    else:
+        theme.dynamics_card(summary, PLR_CUTS, 3.0, 18.0)
+
+    extra = [f"Vocal: {v}" for v in summary.vocal]
+    if summary.pumping and summary.pumping.status == "pumping":
+        extra.append("Pumping: the mix ducks after each kick more than your references do. " + ACTIONS[("pump_depth", "high")])
+    for line in extra:
+        st.markdown(f"- {line}")
+
+    def table(rows):
+        return pd.DataFrame([{
+            "measurement": r.name, "you": format_value(r.feature, r.value),
+            "your references": (f"{format_value(r.feature, r.ref_low)} to {format_value(r.feature, r.ref_high)}" if r.ref_low is not None else "-"),
+            "result": r.status or "-",
+        } for r in rows])
+
+    if summary.rows or summary.bands:
+        with st.expander("The measurements behind the verdict"):
+            st.dataframe(table(summary.rows + summary.bands + ([summary.pumping] if summary.pumping else [])),
+                         use_container_width=True, hide_index=True)
+    if summary.sections:
+        st.markdown("##### By section")
+        if summary.section_note:
+            st.markdown(summary.section_note)
+        st.dataframe(pd.DataFrame([{
+            "section": s["section"], "loudness": f"{s['loudness']:.1f} LUFS" if s["loudness"] is not None else "-",
+            "micro-dynamics": f"{s['crest']:.1f} dB" if s["crest"] is not None else "-", "result": s["status"] or "-",
+        } for s in summary.sections]), use_container_width=True, hide_index=True)

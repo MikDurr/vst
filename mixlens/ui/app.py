@@ -1,6 +1,7 @@
 """Streamlit entry point. `mixlens ui` runs this."""
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -24,7 +25,8 @@ st.set_page_config(page_title="MixLens", page_icon="🎚️", layout="wide", ini
 
 @st.cache_resource
 def get_repo() -> Repo:
-    return Repo(PROJECT_ROOT / "mixlens.db")
+    # MIXLENS_DB lets a second instance (testing, a demo) use its own database
+    return Repo(Path(os.environ.get("MIXLENS_DB", PROJECT_ROOT / "mixlens.db")))
 
 
 @st.cache_resource
