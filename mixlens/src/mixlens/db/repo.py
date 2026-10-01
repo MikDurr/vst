@@ -37,10 +37,30 @@ class Repo:
         if "instrumental" not in cols:
             self._conn.execute("ALTER TABLE songs ADD COLUMN instrumental INTEGER DEFAULT 0")
         self._conn.commit()
+        self._inode = self.db_path.stat().st_ino
+
+    def _ensure_connected(self) -> None:
+        """If the database file was deleted or replaced while we held it open
+        (reset script, restore from backup), reconnect instead of failing with
+        'disk I/O error' on a file that no longer exists."""
+        try:
+            same = self.db_path.exists() and self._inode == self.db_path.stat().st_ino
+        except OSError:
+            same = False
+        if same:
+            return
+        try:
+            self._conn.close()
+        except sqlite3.Error:
+            pass
+        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        self._conn.execute("PRAGMA foreign_keys = ON")
+        self._init_schema()
 
     @contextmanager
     def cursor(self):
         with self._lock:
+            self._ensure_connected()
             cur = self._conn.cursor()
             try:
                 yield cur
@@ -50,6 +70,7 @@ class Repo:
 
     def _read_sql(self, query: str, params=()) -> pd.DataFrame:
         with self._lock:
+            self._ensure_connected()
             return pd.read_sql_query(query, self._conn, params=params)
 
     def close(self) -> None:

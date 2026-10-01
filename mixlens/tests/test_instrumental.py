@@ -119,3 +119,13 @@ def test_remove_reference_from_yaml_and_disk(tmp_path):
     save_references(tmp_path, "dream", [("a.wav", buf.getvalue()), ("b.wav", buf.getvalue())])
     remove_reference(tmp_path, "dream/a.wav")
     assert [e.path for e in load_references_yaml(tmp_path)] == ["dream/b.wav"] and not (tmp_path / "dream" / "a.wav").exists()
+
+
+def test_repo_survives_its_database_file_being_deleted(tmp_path):
+    db = tmp_path / "t.db"
+    repo = Repo(db)
+    repo.upsert_song("s", "dream", 120)
+    db.unlink()                                  # e.g. a reset while the app is running
+    assert repo.get_all_versions().empty         # reconnects to a fresh database, no I/O error
+    repo.upsert_song("s2", "dream", 120)
+    assert repo.get_song("s2") is not None and db.exists()
