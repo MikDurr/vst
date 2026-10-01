@@ -106,3 +106,36 @@ def separate_array(
         a, _sr = load_wav(p, target_sr=sr)
         out[key] = a
     return out
+
+
+STEMS4 = ("drums", "bass", "other", "vocals")
+
+
+def separate4(audio_path: str | Path, cache_dir: str | Path, model: str = DEMUCS_MODEL) -> dict[str, Path]:
+    """Split into drums / bass / other / vocals with Demucs, cached by content hash."""
+    audio_path, cache_dir = Path(audio_path), Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    entry_dir = cache_dir / ("s4_" + audio_hash(audio_path))
+    out = {name: entry_dir / f"{name}.wav" for name in STEMS4}
+    if all(p.exists() for p in out.values()):
+        return out
+
+    entry_dir.mkdir(parents=True, exist_ok=True)
+    work = entry_dir / "_work"
+    work.mkdir(exist_ok=True)
+    subprocess.run([*_demucs_cmd(), "-n", model, "-o", str(work), str(audio_path)], check=True)
+    src = work / model / audio_path.stem
+    for name, dest in out.items():
+        shutil.copyfile(src / f"{name}.wav", dest)
+    shutil.rmtree(work, ignore_errors=True)
+    return out
+
+
+def separate4_array(audio: np.ndarray, sr: int, cache_dir: str | Path, tag: str) -> dict[str, np.ndarray]:
+    """4-stem split of an in-memory (channels, samples) signal."""
+    cache_dir = Path(cache_dir)
+    tmp_dir = cache_dir / "_tmp_inputs"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp_path = tmp_dir / f"{tag}.wav"
+    sf.write(str(tmp_path), audio.T, sr)
+    return {name: load_wav(p, target_sr=sr)[0] for name, p in separate4(tmp_path, cache_dir).items()}

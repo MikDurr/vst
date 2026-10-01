@@ -78,6 +78,16 @@ GLOSSARY: dict[str, tuple[str, str, str, str]] = {
     "st_crest_section": ("Micro-dynamics by section", "How squashed each song section is (50 ms crest).",
                          "That section is heavily limited or compressed.", "That section keeps its dynamics."),
     "lufs_section": ("Loudness by section", "Integrated loudness of each song section.", "A quieter section.", "A louder section."),
+    "stem_level": ("Level of each element", "How loud the drums, bass, synths and vocals are against the whole mix.", "Sits further back than your references.", "Sits further forward than your references."),
+    "stem_width": ("Stereo width of each element", "How wide the drums, bass, synths or vocals are (side versus mid energy).", "Narrower than your references.", "Wider than your references."),
+    "stem_centroid": ("Brightness of each element", "How bright each element is (where its energy is centred).", "Darker than your references.", "Brighter than your references."),
+    "stem_crest": ("Dynamics of each element", "How dynamic each element is (peak versus average).", "More compressed than your references.", "More dynamic than your references."),
+    "band_share": ("Who owns each frequency range", "The share of each frequency range's energy held by each element.", "Owns less of that range.", "Owns more of that range."),
+    "kick_bass_ratio": ("Kick versus bass", "Level of the drums' low end against the bass's low end (30-100 Hz).", "Bass-heavy low end.", "Kick-heavy low end."),
+    "low_end_overlap": ("Kick and bass hitting together", "How often the kick and bass are loud at the same moment (0 to 100%).", "They take turns.", "They hit together a lot, so the low end can clash."),
+    "masking": ("Elements crowding each other", "How much two elements fill the same frequencies at the same time and level (0 to 100%).", "Plenty of room between them.", "Crowded: they are likely to mask each other."),
+    "width_motion": ("Stereo-image movement", "How much the stereo width of the highs changes over the song.", "A static image, which sounds flat.", "A moving, lively image."),
+    "spectral_motion": ("Tonal movement", "How much the tonal balance changes over the song.", "The tone barely changes, which sounds flat.", "The tone evolves through the song."),
     "vox_crest": ("Vocal dynamics", "Short-term crest on the vocal stem.",
                   "Over-flattened vocal.", "Uncontrolled vocal peaks."),
     "vox_floor_true": ("Vocal gap noise", "Level of the dry vocal in gaps between phrases, relative to the phrases.",
@@ -209,9 +219,10 @@ UNITS: dict[str, str] = {
     "vox_tail_level": "dB", "vox_tail_decay": "dB/s", "inst_decay": "dB/s", "space_contrast": "dB/s", "vox_tail_bright": "oct",
     "air_ratio": "dB", "presence_ratio": "dB", "side_mid_air": "dB", "vox_air_ratio": "dB", "hf_density": "dB", "side_mid": "dB",
     "ltas": "dB", "wet_dry_true": "dB", "duck_depth_true": "dB", "predelay_true": "ms", "wet_bright_true": "oct",
-    "true_peak": "dBTP", "vir_phone_delta": "dB", "vir_mono_delta": "dB",
+    "true_peak": "dBTP", "stem_level": "dB", "stem_width": "dB", "stem_centroid": "oct", "stem_crest": "dB", "kick_bass_ratio": "dB",
+    "width_motion": "dB", "spectral_motion": "dB", "band_share": "%", "vir_phone_delta": "dB", "vir_mono_delta": "dB",
 }
-PERCENT = {"csi", "csi_p10", "csi_phone", "csi_mono", "csi_wash_drop_true", "csi_phone_delta", "csi_mono_delta", "flat_top_ratio"}
+PERCENT = {"low_end_overlap", "masking", "csi", "csi_p10", "csi_phone", "csi_mono", "csi_wash_drop_true", "csi_phone_delta", "csi_mono_delta", "flat_top_ratio"}
 
 
 def format_value(feature: str, value: float) -> str:

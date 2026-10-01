@@ -115,14 +115,18 @@ def _render_editor(repo, references_dir: Path, entries: list, style: str) -> Non
 def _render_analyze(repo, cfg, references_dir: Path, style: str, entries: list) -> None:
     st.subheader("Measure them")
     known = set(repo.list_refs(style)["path"])
-    todo = [e for e in entries if e.path not in known or e.path + ACCOMPANIMENT_TAG not in set(repo.list_refs(style + "::instrumental")["path"])]
+    known_acc = set(repo.list_refs(style + "::instrumental")["path"])
+    stale = repo.refs_missing_feature(style, "stem_level")  # measured before instrument balance existed
+    todo = [e for e in entries if e.path not in known or e.path + ACCOMPANIMENT_TAG not in known_acc
+            or e.path in stale or e.path + ACCOMPANIMENT_TAG in stale]
     done = len(entries) - len(todo)
     busy = jobs.is_running("references")
 
     theme.callout(
-        f"<b>{done} of {len(entries)} measured.</b> Measuring takes about a minute per song. Each reference is measured "
-        "twice: as it is (used for songs with vocals) and with the vocals stripped out (used for instrumentals), "
-        "so there's nothing to choose later. Run it again whenever you add songs."
+        f"<b>{done} of {len(entries)} measured.</b> Measuring takes a minute or two per song. Each reference is split into drums, bass, "
+        "synths/guitars/pads and vocals, then measured twice: as it is (used for songs with vocals) and with the vocals "
+        "stripped out (used for instrumentals), so there's nothing to choose later. Run it again whenever you add songs, "
+        "or when the app gains a new kind of analysis."
     )
     redo = st.checkbox("Re-measure all of them, even ones already done", key="ref_remeasure") if not todo else False
     targets = entries if redo else todo

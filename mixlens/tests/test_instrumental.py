@@ -36,19 +36,24 @@ def test_song_yaml_flag_and_mix_only_loading(tmp_path):
     assert s.vox_dry is None and set(s.as_dict()) == {"mix"}
 
 
-def test_instrumental_analysis_skips_demucs_and_vocal_features(tmp_path, cfg, monkeypatch):
+def fake_stems(mix, sr, cache, tag):
+    """A stand-in for Demucs: split the signal into four plausible parts."""
+    return {"drums": mix * 0.4, "bass": mix * 0.2, "other": mix * 0.1, "vocals": mix * 0.3}
+
+
+def test_instrumental_analysis_has_no_vocal_features_but_does_have_balance(tmp_path, cfg, monkeypatch):
     d = _instrumental_song(tmp_path)
 
-    def boom(*a, **k):
-        raise AssertionError("Demucs must not run for an instrumental")
-
-    monkeypatch.setattr(pipeline, "_demucs_split", boom)
+    monkeypatch.setattr(pipeline, "_demucs_stems", fake_stems)
     repo = Repo(tmp_path / "t.db")
     result = pipeline.analyze_version(d, "v1", cfg, repo, tmp_path / ".cache")
     assert not result["skipped"]
     feats = set(repo.get_features(entity="version")["feature"])
     assert {"ltas", "lufs_i", "st_crest", "air_ratio", "flat_top_ratio"} <= feats
     assert not {"csi", "vir_med", "space_contrast", "vox_floor_true", "wet_dry_true"} & feats
+    assert {"stem_level", "stem_width", "band_share"} <= feats                       # how the elements sit
+    bands = set(repo.get_features(entity="version")["band"])
+    assert "vocals" not in bands and {"drums", "bass", "other"} <= bands            # no vocal stem for an instrumental
     assert repo.get_song("beat")["instrumental"] is True
 
 
@@ -57,10 +62,7 @@ def test_reference_gets_accompaniment_row_and_envelopes(tmp_path, cfg, monkeypat
     (refs / "dream").mkdir(parents=True)
     repo = Repo(tmp_path / "t.db")
 
-    def fake_split(mix, sr, cache, tag):
-        return mix * 0.0 + 0.001, mix * 0.5  # (vocal, accompaniment)
-
-    monkeypatch.setattr(pipeline, "_demucs_split", fake_split)
+    monkeypatch.setattr(pipeline, "_demucs_stems", fake_stems)
     for i in range(3):
         _noise_wav(refs / "dream" / f"r{i}.wav", seed=i)
         pipeline.analyze_reference(RefEntry(f"dream/r{i}.wav", "dream", "a", "t"), refs, cfg, repo, tmp_path)
@@ -129,3 +131,25 @@ def test_repo_survives_its_database_file_being_deleted(tmp_path):
     assert repo.get_all_versions().empty         # reconnects to a fresh database, no I/O error
     repo.upsert_song("s2", "dream", 120)
     assert repo.get_song("s2") is not None and db.exists()
+
+
+def test_references_measured_before_a_feature_existed_are_found(tmp_path):
+    from mixlens.types import FeatureRow
+    repo = Repo(tmp_path / "t.db")
+    old = repo.upsert_ref("dream/old.wav", "dream", "", "", "h", "")
+    new = repo.upsert_ref("dream/new.wav", "dream", "", "", "h", "")
+    repo.insert_features("ref", old, [FeatureRow("lufs_i", -9.0)])
+    repo.insert_features("ref", new, [FeatureRow("lufs_i", -9.0), FeatureRow("stem_level", -3.0, "bass")])
+    assert repo.refs_missing_feature("dream", "stem_level") == {"dream/old.wav"}
+
+
+def test_a_single_reference_is_called_out_instead_of_pretending_everything_is_in_range(tmp_path, cfg):
+    from mixlens.compare.envelope import Envelope
+    from mixlens.types import FeatureRow
+    repo = Repo(tmp_path / "t.db")
+    repo.upsert_song("s", "pop", 120)
+    vid = repo.upsert_version("s", "v1", "h", "c")
+    repo.insert_features("version", vid, [FeatureRow("lufs_i", -9.0)])
+    repo.replace_envelopes("pop", [Envelope("pop", "lufs_i", "", -9.0, -9.0, -9.0, 0.0, 1)])
+    recs, _results, has = pipeline.recommendations_for(repo, cfg, vid, "pop")
+    assert has and any("Only 1 reference" in r.title for r in recs)

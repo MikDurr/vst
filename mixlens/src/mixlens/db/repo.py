@@ -230,6 +230,17 @@ class Repo:
 
     # -- deleting -----------------------------------------------------------
 
+    def refs_missing_feature(self, style: str, feature: str) -> set[str]:
+        """Paths of a style's references (and their vocals-removed rows) that have no `feature` yet,
+        e.g. references measured before a new analysis existed."""
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT r.path FROM refs r WHERE r.style IN (?, ?) AND NOT EXISTS "
+                "(SELECT 1 FROM features f WHERE f.entity='ref' AND f.entity_id=r.ref_id AND f.feature=?)",
+                (style, style + "::instrumental", feature),
+            )
+            return {row[0] for row in cur.fetchall()}
+
     def delete_version(self, song_id: str, version: str) -> None:
         with self.cursor() as cur:
             cur.execute("SELECT version_id FROM versions WHERE song_id=? AND version=?", (song_id, version))

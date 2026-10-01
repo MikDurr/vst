@@ -76,3 +76,55 @@ def effect_size_bar_figure(regret_df: pd.DataFrame, top_n: int = 20) -> go.Figur
     fig = go.Figure(go.Bar(x=sub["delta"], y=labels, orientation="h", marker_color=colors))
     fig.update_layout(title="Regret signature: Cliff's delta (regret vs held_up)", xaxis_title="delta")
     return theme.style_figure(fig)
+
+
+def range_figure(rows, title: str, formatter, height: int | None = None) -> go.Figure:
+    """One line per row: the shaded band is where your references sit (their middle 80%),
+    the lime marker is you. Without references only the markers show."""
+    fig = go.Figure()
+    labels = [r.label for r in rows][::-1]
+    for i, r in enumerate(rows[::-1]):
+        if r.lo is not None and r.hi is not None:
+            fig.add_shape(type="rect", x0=r.lo, x1=r.hi, y0=i - 0.32, y1=i + 0.32, line_width=0,
+                          fillcolor="rgba(28,243,243,0.28)", layer="below")
+    fig.add_trace(go.Scatter(
+        x=[r.value for r in rows[::-1]], y=labels, mode="markers", name="you",
+        marker=dict(size=16, color=theme.LIME, line=dict(color=theme.BG, width=3)),
+        customdata=[formatter(r) for r in rows[::-1]],
+        hovertemplate="%{y}<br>you: %{customdata}<extra></extra>",
+    ))
+    if any(r.med is not None for r in rows):
+        fig.add_trace(go.Scatter(
+            x=[r.med for r in rows[::-1]], y=labels, mode="markers", name="references (typical)",
+            marker=dict(size=9, color="#FFFFFF", symbol="line-ns-open", line=dict(width=3, color="#FFFFFF")),
+        ))
+    fig.update_layout(title=title, yaxis=dict(automargin=True), showlegend=any(r.med is not None for r in rows))
+    return theme.style_figure(fig, height=height or max(220, 70 + 52 * len(rows)))
+
+
+def share_figure(share: dict) -> go.Figure:
+    """Who owns each frequency range: a stacked bar for you, and one for your references' typical."""
+    from mixlens.compare.balance import ORDER, STEM_LABEL
+
+    ranges = ["sub", "bass", "low-mid", "mid", "high"]
+    ranges = [r for r in ranges if r in share][::-1]
+    colours = {"drums": theme.CORAL, "bass": theme.VIOLET, "other": theme.CYAN, "vocals": theme.LIME}
+    fig = go.Figure()
+    cats = []
+    for r in ranges:
+        cats += [f"{r} · references", f"{r} · you"] if any(v[1] is not None for v in share[r].values()) else [f"{r} · you"]
+    for stem in ORDER:
+        xs, ys = [], []
+        for r in ranges:
+            if stem not in share[r]:
+                continue
+            you, ref = share[r][stem]
+            if ref is not None:
+                ys.append(f"{r} · references"); xs.append(ref)
+            ys.append(f"{r} · you"); xs.append(you)
+        if xs:
+            fig.add_trace(go.Bar(x=xs, y=ys, orientation="h", name=STEM_LABEL[stem], marker_color=colours[stem],
+                                 hovertemplate="%{y}<br>" + STEM_LABEL[stem] + ": %{x:.0f}%<extra></extra>"))
+    fig.update_layout(barmode="stack", title="Who owns each frequency range", xaxis_title="share of the range's energy (%)",
+                      yaxis=dict(categoryorder="array", categoryarray=cats))
+    return theme.style_figure(fig, height=max(320, 60 * len(cats) + 120))

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from mixlens.compare.deviation import DeviationResult
+from mixlens.compare.balance import BALANCE_FEATURES, describe
 from mixlens.compare.glossary import action_for, band_action, explain, feature_name, format_value
 
 FIX, CHECK, NOTE = "fix", "check", "note"
@@ -120,8 +121,13 @@ def _deviations(results: list[DeviationResult], hints: list[dict], rules: dict[s
         action = ". ".join(sentences[1:]) if len(sentences) > 1 else (concrete or h["message"])
         recs.append(Recommendation(FIX if worst == "flag" else CHECK, sentences[0].rstrip("."),
                                    "This measurement is outside what your references do.", action, ev))
-    flagged = sorted((r for r in results if r.level != "ok" and r.feature not in covered), key=lambda r: -abs(r.z))
-    for r in flagged[:6]:
+    flagged = sorted((r for r in results if r.level != "ok" and r.feature not in covered and r.feature != "band_share"), key=lambda r: -abs(r.z))
+    for r in flagged[:10]:
+        found = describe(r.feature, r.band, r.direction) if r.feature in BALANCE_FEATURES else None
+        if found:
+            title, move = found
+            recs.append(Recommendation(FIX if r.level == "flag" else CHECK, title, explain(r.feature, r.direction) or "Outside your references' range.", move, _range(r.feature, r)))
+            continue
         name = feature_name(r.feature) + (f" ({r.band.replace('Hz', ' Hz')})" if r.band else "")
         action = band_action(r.band, r.direction) if r.feature == "ltas" else action_for(r.feature, r.direction)
         how = "much " if abs(r.z) > 4 else ""

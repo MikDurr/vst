@@ -8,12 +8,15 @@ import theme
 from mixlens.compare.glossary import ACTIONS, explain, feature_name, format_value, what_it_measures
 from mixlens.compare.dynamics import PLR_CUTS, Z_CUTS, summarize_dynamics
 from mixlens.pipeline import recommendations_for, reference_range_key
+from mixlens.compare.balance import build_balance
 from plots import ltas_vs_envelope_figure, space_sheen_scatter
+from views import compare_parts
+from views.analyze import _start_analysis
 
 VOCALS, INSTRUMENTALS = "Songs with vocals", "Instrumentals"
 
 
-def render(repo, cfg) -> None:
+def render(repo, cfg, project_root) -> None:
     theme.page_header("Compare", "See how a mix sits against your references, and what to do about it.")
 
     versions_df = repo.get_all_versions()
@@ -50,73 +53,116 @@ def render(repo, cfg) -> None:
     range_key = reference_range_key(style, instrumental, refs_have_vocals)
     recs, results, has_range = recommendations_for(repo, cfg, version_id, range_key)
 
-    _render_safety(repo.get_checks(version_id))
-    _render_dynamics(repo, version_id, range_key)
-
-    # ---- what to do next ----
-    st.subheader("What to do next")
-    fixes = [r for r in recs if r.severity == "fix"]
-    checks = [r for r in recs if r.severity == "check"]
-    if fixes or checks:
-        st.markdown(
-            f'<p class="summary-line">{len(fixes)} to fix first, {len(checks)} to take a look at.</p>', unsafe_allow_html=True
-        )
-    elif has_range:
-        theme.callout("<b>Nothing to fix.</b> Every measurement sits inside the range your references cover, and the safety checks pass.")
-    for rec in recs:
-        theme.rec_card(rec)
-    if instrumental:
-        st.caption(
-            "Instrumental: vocal measurements don't apply. " + (
-                "Compared against your references with their vocals removed (approximate: a little vocal bleed remains)."
-                if refs_have_vocals else "Compared against your references' full mix."
-            )
-        )
-    if not has_range:
-        return
-
-    # ---- the numbers ----
-    st.subheader("The numbers behind it")
     features_df = repo.get_features(entity="version", entity_id=version_id)
+    values = {(r["feature"], r["band"]): float(r["value"]) for _i, r in features_df.iterrows()}
     envelopes = repo.get_envelopes(range_key)
+    report = build_balance(values, envelopes)
+    n_refs = min((e.n for e in envelopes.values()), default=0)
 
-    with st.expander("How to read these", expanded=False):
-        st.markdown(
-            "- *ok* means inside the range your references cover (their middle 80%). *watch* is moderately outside, "
-            "a hint only. *flag* is clearly outside.\n"
-            "- A flag isn't an error. If your references don't share the sound you want, the flag is telling you about the references."
-        )
-
-    st.markdown("##### Tonal balance")
-    st.caption(
-        "Your mix's average spectrum (lime) against the band covering the middle 80% of your references (shaded). "
-        "0 dB is the average level between 250 Hz and 4 kHz, so this shows shape, not loudness."
+    tab_overview, tab_inst, tab_depth, tab_tone, tab_numbers = st.tabs(
+        ["Overview", "Instruments", "Space & depth", "Tone", "All numbers"]
     )
-    env_df = pd.DataFrame([e.__dict__ for e in envelopes.values()])
-    st.plotly_chart(ltas_vs_envelope_figure(features_df, env_df), use_container_width=True)
 
-    flagged = [r for r in results if r.level != "ok"]
-    st.markdown("##### Everything outside your references' range")
-    if flagged:
-        flag_df = pd.DataFrame([
-            {"measurement": feature_name(r.feature) + (f" ({r.band.replace('Hz', ' Hz')})" if r.band else ""),
-             "how far off": {"flag": "clearly", "watch": "a bit"}[r.level],
-             "you": format_value(r.feature, r.value),
-             "your references": (f"{format_value(r.feature, r.ref_low)} to {format_value(r.feature, r.ref_high)}"
-                                 if r.ref_low is not None else ""),
-             "meaning": explain(r.feature, r.direction), "_z": abs(r.z)}
-            for r in flagged
-        ]).sort_values("_z", ascending=False).drop(columns="_z")
-        st.dataframe(flag_df, use_container_width=True, hide_index=True,
-                     column_config={"meaning": st.column_config.TextColumn("what it means", width="large")})
-        with st.expander("What each measurement is"):
-            for feat in sorted({r.feature for r in flagged}):
-                st.markdown(f"**{feature_name(feat)}** (`{feat}`): {what_it_measures(feat)}")
-    else:
-        st.success("Nothing outside the range.")
+    # ---- Overview: the verdicts and what to do ----
+    with tab_overview:
+        _render_safety(repo.get_checks(version_id))
+        _render_dynamics(repo, version_id, range_key)
+        st.subheader("What to do next")
+        fixes = [r for r in recs if r.severity == "fix"]
+        checks = [r for r in recs if r.severity == "check"]
+        if fixes or checks:
+            st.markdown(
+                f'<p class="summary-line">{len(fixes)} to fix first, {len(checks)} to take a look at.</p>', unsafe_allow_html=True
+            )
+        elif has_range:
+            theme.callout("<b>Nothing to fix.</b> Every measurement sits inside the range your references cover, and the safety checks pass.")
+        for rec in recs:
+            theme.rec_card(rec)
+        if instrumental:
+            st.caption(
+                "Instrumental: vocal measurements don't apply. " + (
+                    "Compared against your references with their vocals removed (approximate: a little vocal bleed remains)."
+                    if refs_have_vocals else "Compared against your references' full mix."
+                )
+            )
 
-    if instrumental:
-        return
+    def reanalyze() -> None:
+        song_dir = project_root / "mixes" / song
+        _start_analysis(repo, cfg, project_root, song_dir, song, version, force=True)
+
+    # ---- Instruments: how the elements sit ----
+    with tab_inst:
+        if report is None:
+            reanalyze_callout("Instrument balance isn't available yet.", reanalyze)
+        else:
+            compare_parts.instruments_tab(report, instrumental, n_refs)
+
+    # ---- Space & depth: is it flat? ----
+    with tab_depth:
+        if report is None:
+            reanalyze_callout("Depth analysis isn't available yet.", reanalyze)
+        else:
+            motion = [r for r in (
+                _motion_row("Stereo image movement", "width_motion", values, envelopes),
+                _motion_row("Tonal movement", "spectral_motion", values, envelopes),
+                _motion_row("Loudness movement between sections", "lra", values, envelopes),
+            ) if r]
+            compare_parts.depth_tab(report, motion, n_refs)
+        if not instrumental:
+            _render_space_sheen(repo, style, song, version, features_df)
+
+    # ---- Tone ----
+    with tab_tone:
+        if not has_range:
+            theme.callout("<b>Add references to see tonal balance.</b> The spectrum is plotted against the range your references cover.")
+        else:
+            st.markdown("##### Tonal balance")
+            st.caption(
+                "Your mix's average spectrum (lime) against the band covering the middle 80% of your references (shaded). "
+                "0 dB is the average level between 250 Hz and 4 kHz, so this shows shape, not loudness."
+            )
+            env_df = pd.DataFrame([e.__dict__ for e in envelopes.values()])
+            st.plotly_chart(ltas_vs_envelope_figure(features_df, env_df), use_container_width=True)
+
+    # ---- All numbers ----
+    with tab_numbers:
+        if not has_range:
+            theme.callout("<b>Add references to compare the numbers.</b>")
+            return
+        with st.expander("How to read these", expanded=False):
+            st.markdown(
+                "- *ok* means inside the range your references cover (their middle 80%). *watch* is moderately outside, "
+                "a hint only. *flag* is clearly outside.\n"
+                "- A flag isn't an error. If your references don't share the sound you want, the flag is telling you about the references."
+            )
+        flagged = [r for r in results if r.level != "ok"]
+        st.markdown("##### Everything outside your references' range")
+        if flagged:
+            flag_df = pd.DataFrame([
+                {"measurement": feature_name(r.feature) + (f" ({r.band.replace('Hz', ' Hz').replace('|', ' / ')})" if r.band else ""),
+                 "how far off": {"flag": "clearly", "watch": "a bit"}[r.level],
+                 "you": format_value(r.feature, r.value),
+                 "your references": (f"{format_value(r.feature, r.ref_low)} to {format_value(r.feature, r.ref_high)}"
+                                     if r.ref_low is not None else ""),
+                 "meaning": explain(r.feature, r.direction), "_z": abs(r.z)}
+                for r in flagged
+            ]).sort_values("_z", ascending=False).drop(columns="_z")
+            st.dataframe(flag_df, use_container_width=True, hide_index=True,
+                         column_config={"meaning": st.column_config.TextColumn("what it means", width="large")})
+            with st.expander("What each measurement is"):
+                for feat in sorted({r.feature for r in flagged}):
+                    st.markdown(f"**{feature_name(feat)}** (`{feat}`): {what_it_measures(feat)}")
+        else:
+            st.success("Nothing outside the range.")
+
+
+def _motion_row(label, feature, values, envs):
+    from mixlens.compare.balance import _row
+
+    return _row(label, feature, "", values, envs)
+
+
+def _render_space_sheen(repo, style: str, song: str, version: str, features_df) -> None:
     ref_features = repo.get_features_for_style(style, entity="ref")
     rows = []
     for ref_id, group in ref_features.groupby("entity_id"):
@@ -127,7 +173,7 @@ def render(repo, cfg) -> None:
     if "space_contrast" in mine and "air_ratio" in mine:
         rows.append({"entity": "yours", "space_contrast": mine["space_contrast"], "air_ratio": mine["air_ratio"], "label": f"{song} {version}"})
     if rows:
-        st.markdown("##### Space and sheen")
+        st.markdown("##### Vocal space and sheen")
         st.caption("Right = wetter vocal over a drier instrumental. Up = brighter, airier top end. "
                    "Violet dots are your references; the star is this mix. Aim to land inside the cloud you like.")
         st.plotly_chart(space_sheen_scatter(pd.DataFrame(rows)), use_container_width=True)

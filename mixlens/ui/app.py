@@ -60,7 +60,7 @@ def main() -> None:
     elif page == "Compare":
         from views import compare
 
-        compare.render(repo, cfg)
+        compare.render(repo, cfg, PROJECT_ROOT)
     elif page == "History":
         from views import history
 

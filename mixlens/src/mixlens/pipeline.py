@@ -12,12 +12,14 @@ from mixlens.db.repo import Repo
 from mixlens.features.microdynamics import extract_section_dynamics
 from mixlens.features.registry import extract_all, extract_vocal_inst_pair, extract_whole_mix
 from mixlens.io.loader import audio_hash, load_wav, stems_hash
-from mixlens.io.separate import separate_array
+from mixlens.features.mixbalance import extract_mix_balance
+from mixlens.io.separate import separate4_array
 from mixlens.io.sidecar import RefEntry, SongInfo, load_song_yaml
 from mixlens.io.stems import StemSet, find_stem_set, load_stem_set, required_stems
 from mixlens.types import FeatureRow
 
 DEMUCS_CACHE_DIRNAME = ".demucs_cache"
+MIN_REFERENCES = 3  # fewer than this and a reference 'range' is nearly a single point
 
 # Reference tracks usually have vocals. To compare an instrumental against them
 # fairly, each reference also gets a derived row measured on its Demucs
@@ -27,10 +29,18 @@ INSTRUMENTAL_SUFFIX = "::instrumental"
 ACCOMPANIMENT_TAG = "#accompaniment"
 
 
-def _demucs_split(mix: np.ndarray, sr: int, cache_dir: Path, tag: str) -> tuple[np.ndarray, np.ndarray]:
-    """Split into (vocal, accompaniment), each shape (channels, samples)."""
-    split = separate_array(mix, sr, cache_dir, tag)
-    return split["vocals"], split["accompaniment"]
+def _demucs_stems(mix: np.ndarray, sr: int, cache_dir: Path, tag: str) -> dict[str, np.ndarray]:
+    """drums / bass / other / vocals, each shape (channels, samples)."""
+    return separate4_array(mix, sr, cache_dir, tag)
+
+
+def _accompaniment_stems(stems: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+    return {k: stems[k] for k in ("drums", "bass", "other")}
+
+
+def _split_vocal_accompaniment(stems: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+    """(vocals, everything else) from the 4-stem split."""
+    return stems["vocals"], stems["drums"] + stems["bass"] + stems["other"]
 
 
 def run_checks_only(mix_dir: str | Path, version: str, cfg: Config) -> tuple[list, SongInfo]:
@@ -70,17 +80,22 @@ def analyze_version(
     check_results = run_peak_checks(mix=stems.mix, sr=stems.sr, cfg=cfg, bpm=song.bpm, extra_stems=stems.as_dict())
     repo.insert_checks(version_id, check_results)
 
+    demucs_cache = cache_root / DEMUCS_CACHE_DIRNAME
+    split = _demucs_stems(stems.mix, stems.sr, demucs_cache, f"{song.song}__{version}__mix")
     if song.instrumental:
-        # No vocal anywhere: only whole-mix measurements apply, and there's
-        # nothing for Demucs to separate.
+        # No vocal anywhere: whole-mix measurements, plus how the drums, bass
+        # and everything else sit together. Measured exactly like a reference's
+        # vocals-removed version so the two are comparable.
+        accompaniment = _accompaniment_stems(split)
         feature_rows = extract_whole_mix(stems.mix, stems.sr, cfg)
         feature_rows += extract_section_dynamics(stems.mix, stems.sr, cfg, song.sections)
+        feature_rows += extract_mix_balance(sum(accompaniment.values()), accompaniment, stems.sr, cfg)
     else:
-        demucs_cache = cache_root / DEMUCS_CACHE_DIRNAME
-        vocal_demucs, inst_demucs = _demucs_split(stems.mix, stems.sr, demucs_cache, f"{song.song}__{version}__mix")
+        vocal_demucs, inst_demucs = _split_vocal_accompaniment(split)
         feature_rows = extract_all(
             stems, cfg, vocal_demucs=vocal_demucs, inst_demucs=inst_demucs, sections=song.sections
         )
+        feature_rows += extract_mix_balance(stems.mix, split, stems.sr, cfg)
     flat_top = flat_top_ratio(stems.mix, cfg)
     if not song.instrumental:
         feature_rows += extract_section_dynamics(stems.mix, stems.sr, cfg, song.sections)
@@ -111,18 +126,24 @@ def analyze_reference(ref: RefEntry, references_dir: str | Path, cfg: Config, re
 
     mix, sr = load_wav(audio_path, target_sr=cfg.sample_rate)
     demucs_cache = cache_root / DEMUCS_CACHE_DIRNAME
-    vocal, inst = _demucs_split(mix, sr, demucs_cache, f"ref__{Path(ref.path).stem}__{h[:8]}")
+    split = _demucs_stems(mix, sr, demucs_cache, f"ref__{Path(ref.path).stem}__{h[:8]}")
+    vocal, inst = _split_vocal_accompaniment(split)
 
     rows = extract_whole_mix(mix, sr, cfg)
     rows += extract_vocal_inst_pair(vocal, inst, sr, cfg, include_translation=False)
+    rows += extract_mix_balance(mix, split, sr, cfg)
     repo.insert_features("ref", ref_id, rows)
 
-    # Same whole-mix measurements on the vocals-removed accompaniment, for
-    # comparing instrumentals against this reference.
+    # The same measurements on the vocals-removed accompaniment (drums, bass and
+    # everything else), for comparing instrumentals against this reference.
+    accompaniment = _accompaniment_stems(split)
     acc_id = repo.upsert_ref(
         ref.path + ACCOMPANIMENT_TAG, ref.style + INSTRUMENTAL_SUFFIX, ref.artist, ref.title, h, ref.note
     )
-    repo.insert_features("ref", acc_id, extract_whole_mix(inst, sr, cfg))
+    repo.insert_features(
+        "ref", acc_id,
+        extract_whole_mix(inst, sr, cfg) + extract_mix_balance(sum(accompaniment.values()), accompaniment, sr, cfg),
+    )
     return {"ref_id": ref_id, "path": ref.path, "style": ref.style, "n_features": len(rows)}
 
 
@@ -185,4 +206,13 @@ def recommendations_for(repo: Repo, cfg: Config, version_id: int, range_key: str
     scalars = {f: v for (f, b), v in values.items() if b == ""}
     hints = match_hints(results, list(rules.values()), extra_values=scalars)
     recs = recommend(repo.get_checks(version_id), values, results, hints, rules, bool(envelopes))
+    n_refs = min((e.n for e in envelopes.values()), default=0)
+    if envelopes and n_refs < MIN_REFERENCES:
+        from mixlens.compare.recommend import NOTE, Recommendation
+
+        recs.append(Recommendation(
+            NOTE, f"Only {n_refs} reference{'s' if n_refs != 1 else ''} in this set",
+            "With so few, the 'normal range' is almost a single point, so nothing can show up as out of range and the "
+            "comparisons below can't be trusted.",
+            f"Add more references for this style (at least {MIN_REFERENCES}, ideally 8 to 20), then measure them."))
     return recs, results, bool(envelopes)

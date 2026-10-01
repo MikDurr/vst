@@ -378,20 +378,28 @@ _ZONES = ["#FF8A8A", "#FFC46B", "#2BD67B", "#1CF3F3", "#8EC7FF"]
 
 
 def dynamics_card(summary, cuts: tuple[float, float, float, float], lo: float, hi: float) -> None:
-    """The verdict, a gauge placing the mix between squashed and open, and why.
+    """The compression verdict: a gauge placing the mix between squashed and open."""
+    basis = ("Compared with your references." if summary.basis == "references"
+             else "Rule of thumb: add references for a real comparison.")
+    gauge_card(summary.label, summary.headline.split(": ", 1)[-1], summary.position, summary.drivers, summary.advice,
+               basis, cuts, lo, hi, ("Squashed", "Balanced", "Open"))
+
+
+def gauge_card(label: str, headline: str, position: float, drivers: list[str], advice: str, basis: str,
+               cuts: tuple[float, float, float, float], lo: float, hi: float, ends: tuple[str, str, str]) -> None:
+    """A verdict word, a five-zone gauge with a marker, the evidence, and what to do.
     `cuts`/`lo`/`hi` give the zone boundaries on the gauge's own scale."""
     edges = [lo, *cuts, hi]
     widths = [(edges[i + 1] - edges[i]) / (hi - lo) * 100 for i in range(5)]
     segs = "".join(f'<i style="width:{w:.1f}%;background:{c}"></i>' for w, c in zip(widths, _ZONES))
-    bullets = "".join(f"<li>{html.escape(d)}</li>" for d in summary.drivers)
-    basis = ("Compared with your references." if summary.basis == "references"
-             else "Rule of thumb: add references for a real comparison.")
+    bullets = "".join(f"<li>{html.escape(d)}</li>" for d in drivers)
+    advice_html = f'<p class="try">Try: {html.escape(advice)}</p>' if advice else ""
     st.markdown(
-        f'<div class="dyn"><div class="verdict">{html.escape(summary.label)}</div>'
-        f'<div class="head">{html.escape(summary.headline.split(": ", 1)[-1])}</div>'
-        f'<div class="gauge"><div class="track">{segs}</div><span class="marker" style="left:{summary.position * 100:.1f}%"></span>'
-        f'<div class="ends"><span>Squashed</span><span>Balanced</span><span>Open</span></div></div>'
-        f"<ul>{bullets}</ul><p class=\"try\">Try: {html.escape(summary.advice)}</p>"
+        f'<div class="dyn"><div class="verdict">{html.escape(label)}</div>'
+        f'<div class="head">{html.escape(headline)}</div>'
+        f'<div class="gauge"><div class="track">{segs}</div><span class="marker" style="left:{position * 100:.1f}%"></span>'
+        f'<div class="ends"><span>{html.escape(ends[0])}</span><span>{html.escape(ends[1])}</span><span>{html.escape(ends[2])}</span></div></div>'
+        f"<ul>{bullets}</ul>{advice_html}"
         f'<div class="basis">{html.escape(basis)}</div></div>',
         unsafe_allow_html=True,
     )
