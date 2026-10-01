@@ -1,5 +1,4 @@
-- path: pop/Madison Beer - angel wings (Official Visualizer).mp3
-  style: pop
-  artist: ''
-  title: Madison Beer - angel wings (Official Visualizer)
-  note: ''
+# Registered reference tracks, one entry per file. Populated by `mixlens ref
+# add references/<style>/*.flac --style <style>` (or the References page's
+# "Add references" form). Fill in artist/title/note by hand afterward.
+# See SPEC.md section 1.2 for selection rules.

@@ -5,3 +5,4 @@ __pycache__/
 .demucs_cache/
 mixlens.db
 mixes/*/*.wav
+mixes/*/song.yaml
